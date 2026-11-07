@@ -21,7 +21,7 @@ Nie trzeba forka Zephyra ani hal_espressif. ZMK wymaga na razie łatki (stary st
 - [x] A0: przykład klawiatury Zephyra na S2 mini działa przez USB (Zephyr main, 7.11.2026).
 - [x] A1 krok 1: ten moduł zamiast łatek w Zephyrze.
 - [x] A1 krok 2: ten sam test na Zephyrze 4.4.1 z modułem (sprawdzony na płytce 7.11.2026).
-- [ ] A1 krok 3: USB w ZMK na nowym stosie USB Zephyra (`patches/zmk-usb-next.patch`; kompiluje się, czeka na test na płytce).
+- [x] A1 krok 3: USB w ZMK na nowym stosie USB Zephyra (`patches/zmk-usb-next.patch`; sprawdzony na płytce 7.11.2026: przycisk 0 wpisuje „zmk”).
 - [ ] A1 krok 4: płytka i klawiatura 60% (macierz 5 × 14, EC11, SH1106, PUSH/CON/BAK).
 - [ ] A1 krok 8: warstwa ekranu z danymi z PC przez Raw HID (głośność, CPU i GPU: obciążenie i temperatura, godzina).
 
