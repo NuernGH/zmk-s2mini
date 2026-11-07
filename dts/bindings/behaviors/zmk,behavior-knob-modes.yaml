@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT
+description: |
+  Gałka z kilkoma trybami. Każdy tryb to osobne zachowanie czujnika (np. sensor-rotate);
+  aktywny tryb zmienia &knob_next. Nazwy trybów widać na ekranie.
+
+compatible: "zmk,behavior-knob-modes"
+
+include: behavior-metadata.yaml
+
+properties:
+  "#sensor-binding-cells":
+    type: int
+    required: true
+    const: 0
+  modes:
+    type: phandles
+    required: true
+    description: Zachowania czujnika dla kolejnych trybów.
+  mode-names:
+    type: string-array
+    required: true
+    description: Nazwy trybów na ekranie (tyle samo co modes).

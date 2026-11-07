@@ -15,6 +15,7 @@
         zmk,usb-hid = &zmk_hid;
         zephyr,display = &oled;
         zmk,studio-rpc-uart = &studio_cdc;
+        s2mini,raw-hid = &raw_hid;
     };
 
     /* Macierz (rzędy 0-4) + przyciski modułu OLED jako rząd 5: PUSH, CON, BAK */
@@ -177,6 +178,17 @@ RC(5,0) RC(5,1) RC(5,2)
         protocol-code = "keyboard";
         in-report-size = <64>;
         in-polling-period-us = <1000>;
+    };
+
+    /* Raw HID: dane z PC dla ekranu (program pc-app/s2mini_oled.py), strona 0xFF60, 32 B */
+    raw_hid: raw_hid {
+        compatible = "zephyr,hid-device";
+        label = "S2MINI_RAW";
+        protocol-code = "none";
+        in-report-size = <32>;
+        in-polling-period-us = <10000>;
+        out-report-size = <32>;
+        out-polling-period-us = <10000>;
     };
 };
 

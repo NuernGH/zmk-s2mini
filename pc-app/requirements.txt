@@ -1,0 +1,6 @@
+hidapi>=0.14
+psutil>=5.9
+pycaw>=20240316
+comtypes>=1.2
+pystray>=0.19
+pillow>=10
