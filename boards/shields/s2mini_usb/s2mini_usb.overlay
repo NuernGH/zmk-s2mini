@@ -1,0 +1,25 @@
+/*
+ * USB OTG (DWC2) dla ESP32-S2. Zephyr ma ten kontroler opisany tylko dla ESP32-S3;
+ * S2 ma ten sam blok pod tym samym adresem. Wartości GHWCFG i FIFO jak dla S3.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#include <zephyr/dt-bindings/clock/esp32s2_clock.h>
+#include <zephyr/dt-bindings/interrupt-controller/esp32s2-xtensa-intmux.h>
+
+/ {
+	soc {
+		zephyr_udc0: usb_otg: usb_otg@60080000 {
+			compatible = "espressif,esp32-usb-otg", "snps,dwc2";
+			reg = <0x60080000 DT_SIZE_K(256)>;
+			interrupts = <USB_INTR_SOURCE IRQ_DEFAULT_PRIORITY 0>;
+			interrupt-parent = <&intc>;
+			clocks = <&clock ESP32_USB_MODULE>;
+			num-out-eps = <6>;
+			num-in-eps = <6>;
+			ghwcfg1 = <0x00000000>;
+			ghwcfg2 = <0x224dd930>;
+			ghwcfg4 = <0xd3f0a030>;
+			status = "okay";
+		};
+	};
+};

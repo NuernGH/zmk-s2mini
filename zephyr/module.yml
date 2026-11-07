@@ -1,0 +1,6 @@
+name: zmk-s2mini
+build:
+  cmake: .
+  settings:
+    board_root: .
+    dts_root: .

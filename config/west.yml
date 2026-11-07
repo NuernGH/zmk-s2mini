@@ -1,0 +1,12 @@
+manifest:
+  remotes:
+    - name: petejohanson
+      url-base: https://github.com/petejohanson
+  projects:
+    # Eksperymentalna gałąź ZMK na Zephyrze 4.4.1 (PR zmkfirmware/zmk#3387)
+    - name: zmk
+      remote: petejohanson
+      revision: 5565f2179c1af83bdf210a6a362dfa4193c56189
+      import: app/west.yml
+  self:
+    path: zmk-s2mini
