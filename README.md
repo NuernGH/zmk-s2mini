@@ -12,7 +12,7 @@ Stan: **eksperyment**. ZMK oficjalnie nie obsługuje ESP32. Plan i wyniki testó
 | `boards/shields/s2mini_usb/` | nakładka DTS z kontrolerem USB OTG (DWC2) dla ESP32-S2 pod adresem 0x60080000 |
 | `patches/zmk-usb-next.patch` | łatka na ZMK: opcja `CONFIG_ZMK_USB_NEXT`, czyli USB HID na nowym stosie USB Zephyra (`usb_next.c`, `usb_hid_next.c`), z tym samym API co stare `usb.c`/`usb_hid.c` |
 | `boards/shields/s2mini_zmk_test/` | najprostsza klawiatura ZMK: przycisk 0 wpisuje „zmk ” |
-| `boards/shields/s2mini_60/` | klawiatura 60% ANSI: macierz 5 × 14 (COL2ROW), warstwa Fn, gałka EC11 (głośność, z Fn jasność), przyciski modułu PUSH/CON/BAK, ekran SH1106 przez I2C (IO39/IO37) |
+| `boards/shields/s2mini_60/` | klawiatura 60% ANSI: macierz 5 × 14 (COL2ROW), warstwa Fn, gałka EC11 (głośność, z Fn jasność), przyciski modułu PUSH/CON/BAK, ekran SH1106 przez I2C (IO39/IO37), ZMK Studio przez port szeregowy USB (odblokowanie Fn + \\) |
 | `scripts/build.sh`, `.github/workflows/build.yml` | budowanie obu shieldów; GitHub Actions publikuje pliki `.bin` jako artefakt `firmware-s2mini` |
 | `config/west.yml` | ZMK z gałęzi `core/move-to-zephyr-4-4-0` (Zephyr 4.4.1, PR zmkfirmware/zmk#3387) |
 
@@ -54,7 +54,7 @@ Jeśli CMake nie znajduje Zephyra, dodaj `-DZephyr_DIR=$PWD/zephyr/share/zephyr-
 
 ## Klawiatura 60% (krok 4)
 
-Budowanie jak w kroku 3, tylko `-DSHIELD="s2mini_usb s2mini_60"`. UART0 płytki jest wyłączony, bo IO16 i IO17 to klawisze, więc nie ma konsoli szeregowej.
+Budowanie jak w kroku 3 (dodatkowo potrzebny `protoc`, np. pakiet `protobuf-compiler`), tylko `-DSHIELD="s2mini_usb s2mini_60"`. UART0 płytki jest wyłączony, bo IO16 i IO17 to klawisze, więc nie ma konsoli szeregowej.
 
 ## Licencja
 

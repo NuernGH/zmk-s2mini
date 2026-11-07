@@ -27,7 +27,7 @@
             display-name = "Fn";
             bindings = <
 &kp GRAVE &kp F1 &kp F2 &kp F3 &kp F4 &kp F5 &kp F6  &kp F7    &kp F8    &kp F9     &kp F10   &kp F11 &kp F12 &kp DEL
-&trans    &trans &trans &trans &trans &trans &trans  &kp PG_UP &kp UP    &kp PG_DN  &kp PSCRN &trans  &trans  &trans
+&trans    &trans &trans &trans &trans &trans &trans  &kp PG_UP &kp UP    &kp PG_DN  &kp PSCRN &trans  &trans  &studio_unlock
 &trans    &trans &trans &trans &trans &trans &kp HOME &kp LEFT &kp DOWN  &kp RIGHT  &kp END   &trans  &trans
 &trans    &trans &trans &trans &trans &trans &trans  &trans    &trans    &trans     &trans    &trans
 &trans    &trans &trans &trans &trans &trans &trans  &trans

@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Narzędzia systemowe
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build device-tree-compiler
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build device-tree-compiler protobuf-compiler
 
       - name: Cache Zephyr SDK
         id: sdk-cache
@@ -63,7 +63,7 @@ jobs:
           if [ -d zmk/.git ]; then git -C zmk reset -q --hard && git -C zmk clean -qfd; fi
           west update --narrow -o=--depth=1
           pip install -q -r zephyr/scripts/requirements-base.txt
-          pip install -q "esptool>=5.0.2"
+          pip install -q "esptool>=5.0.2" protobuf
 
       - name: Budowanie
         env:

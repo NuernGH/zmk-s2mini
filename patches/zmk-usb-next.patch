@@ -30,10 +30,10 @@ index d9ddd6f..c4d96af 100644
  target_sources_ifdef(CONFIG_ZMK_BACKLIGHT app PRIVATE src/backlight.c)
  target_sources_ifdef(CONFIG_ZMK_LOW_PRIORITY_WORK_QUEUE app PRIVATE src/workqueue.c)
 diff --git a/app/Kconfig b/app/Kconfig
-index e0fab2c..2396f5d 100644
+index e0fab2c..964184e 100644
 --- a/app/Kconfig
 +++ b/app/Kconfig
-@@ -134,19 +134,41 @@ menu "Output Types"
+@@ -134,19 +134,44 @@ menu "Output Types"
  config ZMK_USB
      bool "USB"
      depends on (!ZMK_SPLIT || (ZMK_SPLIT && ZMK_SPLIT_ROLE_CENTRAL))
@@ -59,6 +59,9 @@ index e0fab2c..2396f5d 100644
 +config ZMK_USB_NEXT_SELF_POWERED
 +    bool "Report the device as self-powered"
 +
++config CDC_ACM_SERIAL_INITIALIZE_AT_BOOT
++    default n
++
 +config ZMK_USB_NEXT_MAX_POWER
 +    int "bMaxPower value (in 2 mA units)"
 +    range 0 250
@@ -80,7 +83,7 @@ index e0fab2c..2396f5d 100644
  
  config USB_NUMOF_EP_WRITE_RETRIES
      default 10
-@@ -154,7 +176,7 @@ config USB_NUMOF_EP_WRITE_RETRIES
+@@ -154,7 +179,7 @@ config USB_NUMOF_EP_WRITE_RETRIES
  config USB_HID_POLL_INTERVAL_MS
      default 1
  
@@ -89,7 +92,7 @@ index e0fab2c..2396f5d 100644
  
  menuconfig ZMK_BLE
      bool "BLE (HID over GATT)"
-@@ -490,7 +512,7 @@ rsource "src/boot/Kconfig"
+@@ -490,7 +515,7 @@ rsource "src/boot/Kconfig"
  
  menu "Initialization Priorities"
  
@@ -503,10 +506,10 @@ index 0000000..6b62c41
 +SYS_INIT(zmk_usb_hid_init, APPLICATION, CONFIG_ZMK_USB_HID_INIT_PRIORITY);
 diff --git a/app/src/usb_next.c b/app/src/usb_next.c
 new file mode 100644
-index 0000000..3650d96
+index 0000000..da78a0c
 --- /dev/null
 +++ b/app/src/usb_next.c
-@@ -0,0 +1,203 @@
+@@ -0,0 +1,208 @@
 +/*
 + * Copyright (c) 2026 The ZMK Contributors
 + *
@@ -680,8 +683,13 @@ index 0000000..3650d96
 +        return err;
 +    }
 +
-+    /* Interface class codes come from the interface descriptors */
-+    usbd_device_set_code_triple(&zmk_usbd, USBD_SPEED_FS, 0, 0, 0);
++    if (IS_ENABLED(CONFIG_USBD_CDC_ACM_CLASS)) {
++        /* CDC ACM (e.g. ZMK Studio) uses an Interface Association Descriptor */
++        usbd_device_set_code_triple(&zmk_usbd, USBD_SPEED_FS, USB_BCC_MISCELLANEOUS, 0x02, 0x01);
++    } else {
++        /* Interface class codes come from the interface descriptors */
++        usbd_device_set_code_triple(&zmk_usbd, USBD_SPEED_FS, 0, 0, 0);
++    }
 +    usbd_self_powered(&zmk_usbd, IS_ENABLED(CONFIG_ZMK_USB_NEXT_SELF_POWERED));
 +
 +    err = usbd_msg_register_cb(&zmk_usbd, zmk_usbd_msg_cb);

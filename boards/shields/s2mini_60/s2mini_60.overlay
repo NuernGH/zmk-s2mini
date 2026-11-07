@@ -14,6 +14,7 @@
         zmk,physical-layout = &layout_s2mini_60;
         zmk,usb-hid = &zmk_hid;
         zephyr,display = &oled;
+        zmk,studio-rpc-uart = &studio_cdc;
     };
 
     /* Macierz (rzędy 0-4) + przyciski modułu OLED jako rząd 5: PUSH, CON, BAK */
@@ -209,6 +210,13 @@ RC(5,0) RC(5,1) RC(5,2)
         segment-remap;
         com-invdir;
         prechargep = <0x22>;
+    };
+};
+
+/* Port szeregowy USB (CDC ACM) dla ZMK Studio */
+&zephyr_udc0 {
+    studio_cdc: studio_cdc {
+        compatible = "zephyr,cdc-acm-uart";
     };
 };
 
