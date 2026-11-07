@@ -25,7 +25,7 @@ Nie trzeba forka Zephyra ani hal_espressif. ZMK wymaga na razie łatki (stary st
 - [x] A1 krok 2: ten sam test na Zephyrze 4.4.1 z modułem (sprawdzony na płytce 7.11.2026).
 - [x] A1 krok 3: USB w ZMK na nowym stosie USB Zephyra (`patches/zmk-usb-next.patch`; sprawdzony na płytce 7.11.2026: przycisk 0 wpisuje „zmk”).
 - [ ] A1 krok 4: płytka i klawiatura 60% (macierz 5 × 14, EC11, SH1106, PUSH/CON/BAK): shield `s2mini_60` kompiluje się, czeka na test.
-- [ ] A1 krok 6: budowanie w GitHub Actions (zakładka Actions → ostatni przebieg → artefakt `firmware-s2mini`).
+- [x] A1 krok 6: budowanie w GitHub Actions (zakładka Actions → ostatni przebieg → artefakt `firmware-s2mini`).
 - [ ] A1 krok 8: warstwa ekranu z danymi z PC przez Raw HID (głośność, CPU i GPU: obciążenie i temperatura, godzina).
 
 ## Test USB (krok 2)
