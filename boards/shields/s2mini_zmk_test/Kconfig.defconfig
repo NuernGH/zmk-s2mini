@@ -1,0 +1,12 @@
+if SHIELD_S2MINI_ZMK_TEST
+
+config ZMK_KEYBOARD_NAME
+    default "S2 mini ZMK test"
+
+config ZMK_USB
+    default y
+
+config ZMK_USB_NEXT
+    default y
+
+endif

@@ -1,0 +1,30 @@
+/*
+ * Test ZMK na S2 mini: jeden klawisz = przycisk "0" (GPIO0).
+ * Wymaga też shielda s2mini_usb (węzeł USB OTG).
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+    chosen {
+        zmk,matrix-input = &matrix;
+        zmk,usb-hid = &zmk_hid;
+    };
+
+    matrix: matrix {
+        compatible = "zmk,input-gpio-direct";
+        input-gpios = <&gpio0 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+
+    zmk_hid: zmk_hid {
+        compatible = "zephyr,hid-device";
+        label = "ZMK_HID";
+        protocol-code = "keyboard";
+        in-report-size = <64>;
+        in-polling-period-us = <1000>;
+    };
+};
+
+/* Przycisk "0" obsługuje teraz ZMK, nie sterownik gpio-keys z płytki */
+&{/gpio_keys} {
+    status = "disabled";
+};
