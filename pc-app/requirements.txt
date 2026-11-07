@@ -4,3 +4,4 @@ pycaw>=20240316
 comtypes>=1.2
 pystray>=0.19
 pillow>=10
+pyserial>=3.5

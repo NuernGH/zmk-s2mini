@@ -13,7 +13,7 @@ Stan: **eksperyment**. ZMK oficjalnie nie obsługuje ESP32. Plan i wyniki testó
 | `patches/zmk-usb-next.patch` | łatka na ZMK: opcja `CONFIG_ZMK_USB_NEXT`, czyli USB HID na nowym stosie USB Zephyra (`usb_next.c`, `usb_hid_next.c`), z tym samym API co stare `usb.c`/`usb_hid.c` |
 | `boards/shields/s2mini_zmk_test/` | najprostsza klawiatura ZMK: przycisk 0 wpisuje „zmk ” |
 | `boards/shields/s2mini_60/` | klawiatura 60% ANSI: macierz 5 × 14 (COL2ROW), warstwy BASE / GAME / FN, gałka EC11 z trybami, przyciski modułu PUSH/CON/BAK, ekran SH1106 przez I2C (IO39/IO37), ZMK Studio przez port szeregowy USB (odblokowanie Fn + \\) |
-| `src/behaviors/`, `dts/bindings/` | zachowania `&knob` (gałka z trybami) i `&knob_next` (następny tryb) |
+| `src/behaviors/`, `dts/bindings/` | zachowania `&knob` (gałka z trybami), `&knob_next` (następny tryb), `&scr_view SCR_PREV/SCR_NEXT` (widok ekranu) |
 | `src/raw_hid.c` | drugi interfejs HID (Raw HID, strona 0xFF60, 32 B) z danymi z PC dla ekranu |
 | `src/display/` | własny ekran 128 × 64 (teksty po angielsku) i czcionki z DejaVu Sans Bold |
 | `pc-app/` | program na Windows wysyłający dane z PC na ekran |
@@ -66,17 +66,18 @@ Budowanie jak w kroku 3 (dodatkowo potrzebny `protoc`, np. pakiet `protobuf-comp
 
 | Klawisz | Działanie |
 | --- | --- |
-| PUSH (wciśnięcie gałki) | następny tryb gałki: VOLUME → SCROLL (kółko myszy) → TRACK (utwory) → BRIGHT (jasność ekranu); ekran pokazuje tryb przez 1,5 s |
-| Fn + PUSH | wyciszenie |
-| CON / BAK | play/pauza, następny utwór (z Fn: poprzedni utwór, stop) |
+| PUSH (wciśnięcie gałki), krótko | następny tryb gałki: VOLUME → SCROLL (kółko myszy) → TRACK (utwory) → BRIGHT (jasność ekranu); ekran pokazuje tryb przez 1,5 s |
+| PUSH, długo (ponad 0,3 s) | wyciszenie |
+| CON / BAK, krótko | poprzedni / następny widok ekranu (główny, porty COM) |
+| CON / BAK, długo | play/pauza / następny utwór |
 | Fn + G | tryb GAME (włącz/wyłącz): Win nie działa, Caps Lock wysyła F13 (można go przypisać w grze), ekran pokazuje GAME i temperatury |
 | Fn + \\ | odblokowanie ZMK Studio |
 
-Nazwy warstw na ekranie to `display-name` z keymapy (można je zmienić też w ZMK Studio). Nazwy trybów gałki są w `mode-names` węzła `knob` w keymapie; tam też można dodać, usunąć albo zmienić tryby (każdy tryb to zwykłe `zmk,behavior-sensor-rotate`). Ekran rozpoznaje tryb GAME po etykiecie `game_layer` warstwy.
+Przyciski przy ekranie nie mają skrótów z Fn (Fn jest tylko dla klawiatury). Nazwy warstw na ekranie to `display-name` z keymapy (można je zmienić też w ZMK Studio). Nazwy trybów gałki są w `mode-names` węzła `knob` w keymapie; tam też można dodać, usunąć albo zmienić tryby (każdy tryb to zwykłe `zmk,behavior-sensor-rotate`). Ekran rozpoznaje tryb GAME po etykiecie `game_layer` warstwy.
 
 ### Ekran i dane z PC
 
-Ekran ma cztery widoki: główny (godzina, warstwa, CPU i GPU: obciążenie i temperatura, głośność, tryb gałki), GAME, zmianę trybu gałki i „no data from PC”, gdy przez 5 s nic nie przyszło. Podgląd wyrenderowany z kodu ekranu: `ekran-z-firmware.png` w plikach projektu.
+Ekran ma widoki: główny (godzina, warstwa, CPU i GPU: obciążenie i temperatura, głośność, tryb gałki), GAME, zmianę trybu gałki, „no data from PC”, gdy przez 5 s nic nie przyszło, oraz listę portów COM (do 4 na ekranie; nowo podłączony port pokazuje ten widok sam na 3 s). Podgląd wyrenderowany z kodu ekranu: `ekran-z-firmware.png` w plikach projektu.
 
 Dane wysyła `pc-app/s2mini_oled.py` raz na sekundę jako raport wyjściowy Raw HID (VID 1D50, PID 615E, strona 0xFF60):
 
@@ -88,6 +89,8 @@ Dane wysyła `pc-app/s2mini_oled.py` raz na sekundę jako raport wyjściowy Raw 
 | 5, 6 | GPU: obciążenie %, temperatura °C |
 | 7 | głośność % |
 | 8, 9, 10 | godzina, minuta, sekunda |
+
+Lista portów COM idzie co 2 s jako osobne ramki, po jednej na port: bajty 0x53, 0x02, numer portu, liczba portów, potem tekst do 28 znaków (np. „COM12 ZMK S2 mini”). Przy braku portów wysyłana jest jedna ramka z liczbą 0.
 
 Na Windows:
 

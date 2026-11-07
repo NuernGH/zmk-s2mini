@@ -7,6 +7,11 @@
  *   [3] CPU %  [4] CPU °C  [5] GPU %  [6] GPU °C  [7] głośność %
  *   [8] godzina  [9] minuta  [10] sekunda   reszta = 0
  *
+ * Ramka z listą portów COM (jedna ramka na port, wysyłane po kolei):
+ *   [0] 0x53  [1] 0x02  [2] numer portu (od 0)  [3] liczba portów
+ *   [4..31] tekst, np. "COM12 S2 mini 60" (do 28 znaków, reszta 0)
+ *   Przy 0 portach jedna ramka z [3] = 0.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -26,6 +31,7 @@ LOG_MODULE_REGISTER(s2mini_raw_hid, CONFIG_ZMK_LOG_LEVEL);
 #define RAW_HID_REPORT_SIZE 32
 #define FRAME_MAGIC 0x53
 #define FRAME_VERSION 0x01
+#define FRAME_PORTS 0x02
 
 static const uint8_t raw_hid_desc[] = {
     0x06, 0x60, 0xFF,       /* Usage Page (Vendor 0xFF60) */
@@ -63,7 +69,74 @@ bool s2mini_pc_data_get(struct s2mini_pc_data *out, int64_t *age_ms) {
     return ok;
 }
 
+/* Porty COM: lista zbierana z kolejnych ramek, zatwierdzana po ostatniej. */
+static char ports[S2MINI_PORTS_MAX][S2MINI_PORT_TEXT];
+static int ports_count = -1;
+static int64_t ports_at;
+static int64_t ports_added_at;
+static char pending[S2MINI_PORTS_MAX][S2MINI_PORT_TEXT];
+
+int s2mini_ports_get(char out[][S2MINI_PORT_TEXT], int max, int64_t *age_ms, int64_t *added_at) {
+    int count;
+    K_SPINLOCK(&lock) {
+        count = ports_count;
+        for (int i = 0; i < MIN(MAX(count, 0), MIN(max, S2MINI_PORTS_MAX)); i++) {
+            memcpy(out[i], ports[i], S2MINI_PORT_TEXT);
+        }
+        if (age_ms != NULL) {
+            *age_ms = count >= 0 ? k_uptime_get() - ports_at : INT64_MAX;
+        }
+        if (added_at != NULL) {
+            *added_at = ports_added_at;
+        }
+    }
+    return count;
+}
+
+static bool known_port(const char *text) {
+    for (int i = 0; i < MIN(MAX(ports_count, 0), S2MINI_PORTS_MAX); i++) {
+        if (strncmp(ports[i], text, S2MINI_PORT_TEXT) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void parse_ports(const uint8_t *buf, uint16_t len) {
+    int index = buf[2];
+    int count = buf[3];
+
+    if (count > 0 && index < S2MINI_PORTS_MAX) {
+        size_t n = MIN(len - 4, S2MINI_PORT_TEXT - 1);
+        memcpy(pending[index], &buf[4], n);
+        pending[index][n] = '\0';
+    }
+    if (count > 0 && index != count - 1) {
+        return;
+    }
+
+    K_SPINLOCK(&lock) {
+        bool added = false;
+        for (int i = 0; i < MIN(count, S2MINI_PORTS_MAX); i++) {
+            /* Nowy port (nie przy pierwszej liście po starcie) pokazuje ekran portów. */
+            if (ports_count >= 0 && !known_port(pending[i])) {
+                added = true;
+            }
+        }
+        memcpy(ports, pending, sizeof(ports));
+        ports_count = count;
+        ports_at = k_uptime_get();
+        if (added) {
+            ports_added_at = ports_at;
+        }
+    }
+}
+
 static void parse_frame(const uint8_t *buf, uint16_t len) {
+    if (len >= 5 && buf[0] == FRAME_MAGIC && buf[1] == FRAME_PORTS) {
+        parse_ports(buf, len);
+        return;
+    }
     if (len < 11 || buf[0] != FRAME_MAGIC || buf[1] != FRAME_VERSION) {
         LOG_DBG("raw hid: unknown frame (len %u)", len);
         return;

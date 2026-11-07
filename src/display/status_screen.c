@@ -3,7 +3,8 @@
  *  1. główny: godzina, warstwa, CPU/GPU (obciążenie + temp.), głośność, tryb gałki;
  *  2. GAME (warstwa z etykietą game_layer aktywna): duże temperatury CPU/GPU;
  *  3. zmiana trybu gałki: na ok. 1,5 s nazwa trybu i kropki;
- *  4. brak danych z PC: tylko warstwa i tryb gałki.
+ *  4. brak danych z PC: tylko warstwa i tryb gałki;
+ *  5. porty COM (CON/BAK przełączają widok; nowy port pokazuje się sam na 3 s).
  * Stan sprawdza timer LVGL co 100 ms, więc nic nie dotyka LVGL spoza wątku ekranu.
  *
  * SPDX-License-Identifier: MIT
@@ -27,13 +28,15 @@ LV_FONT_DECLARE(s2m_font_20);
 #define H 64
 #define BAR_H 12
 #define POPUP_MS 1500
+#define PORTS_POPUP_MS 3000
+#define PORT_ROWS 4
 #define PC_TIMEOUT_MS CONFIG_S2MINI_STATUS_PC_TIMEOUT_MS
 
 #define GAME_LAYER_NODE DT_NODELABEL(game_layer)
 
 static lv_color_t fg, bg;
 
-enum view { VIEW_MAIN, VIEW_GAME, VIEW_KNOB, VIEW_NO_PC, VIEW_COUNT };
+enum view { VIEW_MAIN, VIEW_GAME, VIEW_KNOB, VIEW_NO_PC, VIEW_PORTS, VIEW_COUNT };
 
 static lv_obj_t *views[VIEW_COUNT];
 
@@ -56,6 +59,9 @@ static lv_obj_t *k_dots[MAX_DOTS];
 
 /* 4. bez PC */
 static lv_obj_t *n_layer, *n_knob;
+
+/* 5. porty COM */
+static lv_obj_t *p_count, *p_rows[PORT_ROWS];
 
 static lv_obj_t *box(lv_obj_t *parent, int x, int y, int w, int h, bool filled, int border) {
     lv_obj_t *o = lv_obj_create(parent);
@@ -158,6 +164,60 @@ static void create_no_pc(lv_obj_t *v) {
     n_knob = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_LEFT, 0, 0, "");
 }
 
+static void create_ports(lv_obj_t *v) {
+    top_bar(v);
+    label(v, &s2m_font_9, true, LV_ALIGN_TOP_LEFT, 2, 1, "COM PORTS");
+    p_count = label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
+    for (int i = 0; i < PORT_ROWS; i++) {
+        p_rows[i] = label(v, &s2m_font_9, false, LV_ALIGN_TOP_LEFT, 0, 14 + i * 12, "");
+        lv_label_set_long_mode(p_rows[i], LV_LABEL_LONG_MODE_CLIP);
+        lv_obj_set_width(p_rows[i], W);
+    }
+}
+
+static void update_ports(void) {
+    static char list[PORT_ROWS][S2MINI_PORT_TEXT];
+    int64_t age = INT64_MAX;
+    int count = -1;
+
+#if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
+    count = s2mini_ports_get(list, PORT_ROWS, &age, NULL);
+#endif
+
+    for (int i = 0; i < PORT_ROWS; i++) {
+        lv_label_set_text(p_rows[i], "");
+    }
+    if (count < 0 || age > PC_TIMEOUT_MS) {
+        lv_label_set_text(p_count, "");
+        lv_label_set_text(p_rows[1], "no data from PC");
+        return;
+    }
+    if (count == 0) {
+        lv_label_set_text(p_count, "0");
+        lv_label_set_text(p_rows[1], "no COM ports");
+        return;
+    }
+    lv_label_set_text_fmt(p_count, "%d", count);
+    for (int i = 0; i < MIN(count, PORT_ROWS); i++) {
+        lv_label_set_text(p_rows[i], list[i]);
+    }
+    if (count > PORT_ROWS) {
+        lv_label_set_text_fmt(p_rows[PORT_ROWS - 1], "... +%d more", count - (PORT_ROWS - 1));
+    }
+}
+
+static bool ports_wanted(void) {
+#if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
+    int64_t added_at = 0;
+    static char dummy[1][S2MINI_PORT_TEXT];
+    s2mini_ports_get(dummy, 0, NULL, &added_at);
+    if (added_at != 0 && k_uptime_get() - added_at < PORTS_POPUP_MS) {
+        return true;
+    }
+#endif
+    return s2mini_screen_view() == S2MINI_VIEW_PORTS;
+}
+
 static bool game_active(void) {
 #if DT_NODE_EXISTS(GAME_LAYER_NODE)
     return zmk_keymap_layer_active(DT_NODE_CHILD_IDX(GAME_LAYER_NODE));
@@ -220,6 +280,12 @@ static void update_cb(lv_timer_t *timer) {
             }
         }
         show(VIEW_KNOB);
+        return;
+    }
+
+    if (ports_wanted()) {
+        update_ports();
+        show(VIEW_PORTS);
         return;
     }
 
@@ -296,6 +362,7 @@ lv_obj_t *zmk_display_status_screen(void) {
     create_game(views[VIEW_GAME]);
     create_knob(views[VIEW_KNOB]);
     create_no_pc(views[VIEW_NO_PC]);
+    create_ports(views[VIEW_PORTS]);
 
     update_cb(NULL);
     lv_timer_create(update_cb, 100, NULL);

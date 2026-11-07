@@ -16,6 +16,7 @@ endif()
 if(TARGET app AND (CONFIG_S2MINI_KNOB_MODES OR CONFIG_S2MINI_RAW_HID OR CONFIG_S2MINI_STATUS_SCREEN))
   target_include_directories(app PRIVATE include)
   target_sources_ifdef(CONFIG_S2MINI_KNOB_MODES app PRIVATE src/behaviors/behavior_knob_modes.c)
+  target_sources(app PRIVATE src/behaviors/behavior_screen_view.c)
   target_sources_ifdef(CONFIG_S2MINI_RAW_HID app PRIVATE src/raw_hid.c)
   if(CONFIG_S2MINI_STATUS_SCREEN)
     target_sources(app PRIVATE

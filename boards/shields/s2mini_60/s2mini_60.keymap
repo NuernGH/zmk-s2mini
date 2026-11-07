@@ -2,8 +2,10 @@
  * 60% ANSI na S2 mini: warstwy BASE, GAME, FN; gałka z trybami i przyciski modułu OLED.
  * Ostatni rząd w keymapie to przyciski modułu: PUSH (gałka), CON, BAK.
  *
- * PUSH       = następny tryb gałki: VOLUME → SCROLL → TRACK → BRIGHT (nazwy widać na ekranie)
- * Fn + PUSH  = wyciszenie
+ * Przyciski przy ekranie (bez Fn; krótko / długo, ponad 0,3 s):
+ * PUSH       = następny tryb gałki: VOLUME → SCROLL → TRACK → BRIGHT / wyciszenie
+ * CON        = poprzedni widok ekranu (główny, porty COM) / play-pauza
+ * BAK        = następny widok ekranu / następny utwór
  * Fn + G     = tryb GAME (włącz/wyłącz): Win nie działa, Caps Lock wysyła F13
  *              (da się go przypisać w grze, nie zmienia wielkości liter)
  * Fn + \     = odblokowanie ZMK Studio
@@ -15,6 +17,7 @@
 #include <behaviors.dtsi>
 #include <dt-bindings/zmk/keys.h>
 #include <dt-bindings/zmk/pointing.h>
+#include <dt-bindings/zmk/s2mini.h>
 
 / {
     behaviors {
@@ -51,6 +54,28 @@
             #binding-cells = <0>;
             display-name = "Knob mode";
         };
+        scr_view: scr_view {
+            compatible = "zmk,behavior-screen-view";
+            #binding-cells = <1>;
+            display-name = "Screen view";
+        };
+        /* Przyciski przy ekranie: krótko = tap (ekran/gałka), długo = hold (multimedia) */
+        push_ht: push_ht {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            display-name = "Knob button";
+            flavor = "tap-preferred";
+            tapping-term-ms = <300>;
+            bindings = <&kp>, <&knob_next>;
+        };
+        view_ht: view_ht {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            display-name = "Screen button";
+            flavor = "tap-preferred";
+            tapping-term-ms = <300>;
+            bindings = <&kp>, <&scr_view>;
+        };
     };
 
     keymap {
@@ -64,7 +89,7 @@
 &kp CAPS  &kp A    &kp S    &kp D  &kp F  &kp G  &kp H  &kp J  &kp K  &kp L     &kp SEMI &kp SQT   &kp RET
 &kp LSHFT &kp Z    &kp X    &kp C  &kp V  &kp B  &kp N  &kp M  &kp COMMA &kp DOT &kp FSLH &kp RSHFT
 &kp LCTRL &kp LGUI &kp LALT &kp SPACE &kp RALT &kp RGUI &mo 2 &kp RCTRL
-&knob_next &kp C_PP &kp C_NEXT
+&push_ht C_MUTE 0 &view_ht C_PP SCR_PREV &view_ht C_NEXT SCR_NEXT
             >;
             sensor-bindings = <&knob>;
         };
@@ -89,7 +114,7 @@
 &trans    &trans &trans &trans &trans &tog 1 &kp HOME &kp LEFT &kp DOWN  &kp RIGHT  &kp END   &trans  &trans
 &trans    &trans &trans &trans &trans &trans &trans  &trans    &trans    &trans     &trans    &trans
 &trans    &trans &trans &trans &trans &trans &trans  &trans
-&kp C_MUTE &kp C_PREV &kp C_STOP
+&trans    &trans     &trans
             >;
         };
     };

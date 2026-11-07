@@ -33,5 +33,20 @@ struct s2mini_pc_data {
     uint8_t second;
 };
 
+/* Porty COM z PC (ramka 0x02). */
+#define S2MINI_PORTS_MAX 8
+#define S2MINI_PORT_TEXT 28
+
+/*
+ * Kopiuje listę portów do out (max pozycji), zwraca liczbę portów (może być większa niż max)
+ * albo -1, gdy lista jeszcze nie przyszła. added_at = czas, gdy pojawił się nowy port (0 = nigdy).
+ */
+int s2mini_ports_get(char out[][S2MINI_PORT_TEXT], int max, int64_t *age_ms, int64_t *added_at);
+
+/* Widok ekranu wybierany przez &scr_view. */
+enum s2mini_view { S2MINI_VIEW_MAIN, S2MINI_VIEW_PORTS, S2MINI_VIEW_COUNT };
+int s2mini_screen_view(void);
+void s2mini_screen_view_step(int delta);
+
 /* Ostatnie dane z PC. Zwraca false, gdy jeszcze nic nie przyszło. age_ms = wiek danych. */
 bool s2mini_pc_data_get(struct s2mini_pc_data *out, int64_t *age_ms);

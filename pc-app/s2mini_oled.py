@@ -1,12 +1,14 @@
 """
 Wysyła dane z PC na ekran klawiatury S2 mini 60 (ZMK, Raw HID):
-głośność, obciążenie i temperatura CPU/GPU, godzina. Raz na sekundę.
+głośność, obciążenie i temperatura CPU/GPU, godzina (raz na sekundę)
+oraz listę podłączonych portów COM (co 2 s).
 
 Źródła danych (Windows):
 - głośność: pycaw (domyślne wyjście audio),
 - CPU/GPU: LibreHardwareMonitor z włączonym „Remote Web Server” (http://localhost:8085),
   a bez niego obciążenie CPU z psutil i GPU NVIDIA z nvidia-smi (bez temperatury CPU),
-- godzina: zegar systemu.
+- godzina: zegar systemu,
+- porty COM: pyserial (nazwy znanych płytek po VID:PID).
 
 Uruchomienie:  pythonw s2mini_oled.py          (ikona w zasobniku, gdy jest pystray)
                python  s2mini_oled.py --console (wypisuje wysyłane dane)
@@ -28,7 +30,8 @@ VID = 0x1D50
 PID = 0x615E
 USAGE_PAGE = 0xFF60
 REPORT_SIZE = 32
-MAGIC, VERSION = 0x53, 0x01
+MAGIC, VERSION, PORTS = 0x53, 0x01, 0x02
+PORT_TEXT = 28
 F_CPU, F_GPU, F_VOLUME, F_TIME, F_MUTED = 1, 2, 4, 8, 16
 
 LHM_URL = "http://localhost:8085/data.json"
@@ -176,6 +179,61 @@ def frame(data):
     return bytes(b)
 
 
+# ---------- porty COM ----------
+
+KNOWN_USB = {
+    (0x303A, 0x0002): "ESP32-S2 boot",
+    (0x303A, 0x1001): "ESP32-S3/C3 JTAG",
+    (0x303A, 0x0009): "ESP32-S3 boot",
+    (0x1D50, 0x615E): "ZMK S2 mini",
+    (0x2E8A, 0x0005): "RP2040 MicroPython",
+    (0x2E8A, 0x000A): "RP2040",
+    (0x239A, None): "Adafruit",
+    (0x2341, None): "Arduino",
+    (0x1A86, None): "CH340",
+    (0x10C4, None): "CP210x",
+    (0x0403, None): "FTDI",
+}
+
+
+def port_label(p):
+    name = KNOWN_USB.get((p.vid, p.pid)) or KNOWN_USB.get((p.vid, None))
+    if not name:
+        name = (p.product or p.description or "").replace(f"({p.device})", "").strip()
+        for junk in ("USB Serial Device", "Standard Serial over Bluetooth link"):
+            if name.startswith(junk) and p.manufacturer and "Microsoft" not in p.manufacturer:
+                name = p.manufacturer
+        name = name.replace("Standard Serial over Bluetooth link", "Bluetooth")
+    return f"{p.device} {name}".strip()[:PORT_TEXT - 1]
+
+
+def list_com_ports():
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        return None
+
+    def key(p):
+        digits = "".join(c for c in p.device if c.isdigit())
+        return (int(digits) if digits else 0, p.device)
+
+    return [port_label(p) for p in sorted(list_ports.comports(), key=key)]
+
+
+def port_frames(labels):
+    """Ramki 0x02: po jednej na port; przy pustej liście jedna ramka z liczbą 0."""
+    frames = []
+    count = min(len(labels), 255)
+    for i, text in enumerate(labels[:255] or [None]):
+        b = bytearray(REPORT_SIZE)
+        b[0], b[1], b[2], b[3] = MAGIC, PORTS, i, count
+        if text:
+            raw = text.encode("ascii", "replace")[:PORT_TEXT - 1]
+            b[4:4 + len(raw)] = raw
+        frames.append(bytes(b))
+    return frames
+
+
 # ---------- klawiatura ----------
 
 def open_keyboard():
@@ -207,9 +265,16 @@ class Sender(threading.Thread):
             psutil.cpu_percent(interval=None)  # pierwszy odczyt zawsze 0
         except Exception:
             pass
+        tick = 0
         while not self.stop_event.is_set():
             data = collect(volume)
-            payload = frame(data)
+            payloads = [frame(data)]
+            if tick % 2 == 0:
+                ports = list_com_ports()
+                if ports is not None:
+                    payloads += port_frames(ports)
+                    data["ports"] = ports
+            tick += 1
             if self.dry_run:
                 self.log(fmt(data))
             else:
@@ -220,8 +285,9 @@ class Sender(threading.Thread):
                         self.log(self.status)
                     if dev is not None:
                         # Windows/hidapi: pierwszy bajt to numer raportu (0 = bez numeru).
-                        if dev.write(b"\x00" + payload) < 0:
-                            raise OSError("write failed")
+                        for payload in payloads:
+                            if dev.write(b"\x00" + payload) < 0:
+                                raise OSError("write failed")
                         self.log(fmt(data))
                 except Exception as e:
                     self.status = f"error: {e}"
@@ -238,7 +304,8 @@ def fmt(d):
     f = lambda v, u: "--" if v is None else f"{v:.0f}{u}"
     return (f"{time.strftime('%H:%M:%S', d['time'])}  CPU {f(d['cpu_load'], '%')} {f(d['cpu_temp'], '°C')}"
             f"  GPU {f(d['gpu_load'], '%')} {f(d['gpu_temp'], '°C')}"
-            f"  VOL {'mute' if d['muted'] else f(d['volume'], '%')}")
+            f"  VOL {'mute' if d['muted'] else f(d['volume'], '%')}"
+            + (f"  PORTS {', '.join(d['ports']) or '-'}" if "ports" in d else ""))
 
 
 def run_tray(sender):
