@@ -1,0 +1,2 @@
+config SHIELD_S2MINI_60
+    def_bool $(shields_list_contains,s2mini_60)
