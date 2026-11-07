@@ -13,6 +13,7 @@ Stan: **eksperyment**. ZMK oficjalnie nie obsługuje ESP32. Plan i wyniki testó
 | `patches/zmk-usb-next.patch` | łatka na ZMK: opcja `CONFIG_ZMK_USB_NEXT`, czyli USB HID na nowym stosie USB Zephyra (`usb_next.c`, `usb_hid_next.c`), z tym samym API co stare `usb.c`/`usb_hid.c` |
 | `boards/shields/s2mini_zmk_test/` | najprostsza klawiatura ZMK: przycisk 0 wpisuje „zmk ” |
 | `boards/shields/s2mini_60/` | klawiatura 60% ANSI: macierz 5 × 14 (COL2ROW), warstwa Fn, gałka EC11 (głośność, z Fn jasność), przyciski modułu PUSH/CON/BAK, ekran SH1106 przez I2C (IO39/IO37) |
+| `scripts/build.sh`, `.github/workflows/build.yml` | budowanie obu shieldów; GitHub Actions publikuje pliki `.bin` jako artefakt `firmware-s2mini` |
 | `config/west.yml` | ZMK z gałęzi `core/move-to-zephyr-4-4-0` (Zephyr 4.4.1, PR zmkfirmware/zmk#3387) |
 
 Nie trzeba forka Zephyra ani hal_espressif. ZMK wymaga na razie łatki (stary stos USB w ZMK nie ma sterownika dla ESP32).
@@ -24,6 +25,7 @@ Nie trzeba forka Zephyra ani hal_espressif. ZMK wymaga na razie łatki (stary st
 - [x] A1 krok 2: ten sam test na Zephyrze 4.4.1 z modułem (sprawdzony na płytce 7.11.2026).
 - [x] A1 krok 3: USB w ZMK na nowym stosie USB Zephyra (`patches/zmk-usb-next.patch`; sprawdzony na płytce 7.11.2026: przycisk 0 wpisuje „zmk”).
 - [ ] A1 krok 4: płytka i klawiatura 60% (macierz 5 × 14, EC11, SH1106, PUSH/CON/BAK): shield `s2mini_60` kompiluje się, czeka na test.
+- [ ] A1 krok 6: budowanie w GitHub Actions (zakładka Actions → ostatni przebieg → artefakt `firmware-s2mini`).
 - [ ] A1 krok 8: warstwa ekranu z danymi z PC przez Raw HID (głośność, CPU i GPU: obciążenie i temperatura, godzina).
 
 ## Test USB (krok 2)

@@ -1,0 +1,76 @@
+name: Build ZMK (S2 mini)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  SDK_VERSION: 1.0.1
+  SDK_DIR: ${{ github.workspace }}/zephyr-sdk-1.0.1
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ws/zmk-s2mini
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Narzędzia systemowe
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build device-tree-compiler
+
+      - name: Cache Zephyr SDK
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SDK_DIR }}
+          key: zephyr-sdk-${{ env.SDK_VERSION }}-esp32s2
+
+      - name: Zephyr SDK (minimal + xtensa esp32s2)
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          base=https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v$SDK_VERSION
+          cd "$GITHUB_WORKSPACE"
+          wget -q "$base/zephyr-sdk-${SDK_VERSION}_linux-x86_64_minimal.tar.xz"
+          wget -q "$base/toolchain_gnu_linux-x86_64_xtensa-espressif_esp32s2_zephyr-elf.tar.xz"
+          tar xf "zephyr-sdk-${SDK_VERSION}_linux-x86_64_minimal.tar.xz"
+          mkdir -p "$SDK_DIR/gnu"
+          tar xf toolchain_gnu_linux-x86_64_xtensa-espressif_esp32s2_zephyr-elf.tar.xz -C "$SDK_DIR/gnu"
+          rm -f ./*.tar.xz
+
+      - name: Cache modułów west
+        uses: actions/cache@v4
+        with:
+          path: |
+            ws/zmk
+            ws/zephyr
+            ws/modules
+          key: west-${{ hashFiles('ws/zmk-s2mini/config/west.yml') }}
+
+      - name: west init + update
+        working-directory: ws
+        run: |
+          pip install -q west
+          mkdir -p manifest
+          sed 's/^\(\s*path:\s*\)zmk-s2mini\s*$/\1manifest/' zmk-s2mini/config/west.yml > manifest/west.yml
+          west init -l manifest
+          west config manifest.project-filter -- '-.*,+zmk,+zephyr,+hal_espressif,+zmk-studio-messages,+nanopb,+lvgl'
+          if [ -d zmk/.git ]; then git -C zmk reset -q --hard && git -C zmk clean -qfd; fi
+          west update --narrow -o=--depth=1
+          pip install -q -r zephyr/scripts/requirements-base.txt
+          pip install -q "esptool>=5.0.2"
+
+      - name: Budowanie
+        env:
+          ZEPHYR_SDK_INSTALL_DIR: ${{ env.SDK_DIR }}
+        run: ws/zmk-s2mini/scripts/build.sh ws
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-s2mini
+          path: ws/out/
