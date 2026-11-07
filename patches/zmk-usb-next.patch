@@ -193,6 +193,31 @@ index 22e73fa..b486098 100644
  ZMK_SUBSCRIPTION(widget_battery_status, zmk_usb_conn_state_changed);
  #endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) */
  
+diff --git a/app/src/studio/uart_rpc_transport.c b/app/src/studio/uart_rpc_transport.c
+index 6dcac6d..be10558 100644
+--- a/app/src/studio/uart_rpc_transport.c
++++ b/app/src/studio/uart_rpc_transport.c
+@@ -136,6 +136,20 @@ static void serial_cb(const struct device *dev, void *user_data) {
+             int sent = uart_fifo_fill(uart_dev, buf, claim_len);
+ 
+             ring_buf_get_finish(tx_buf, MAX(sent, 0));
++
++            if (sent <= 0) {
++                break;
++            }
++        }
++
++        /*
++         * Nothing left to send: stop TX interrupts. Some UART drivers (e.g. CDC ACM on
++         * the new USB device stack) keep calling back while TX is enabled and there is
++         * room in their FIFO, which would starve lower-priority threads (the RPC thread).
++         * tx_notify() enables TX again when more data is queued.
++         */
++        if (ring_buf_is_empty(tx_buf)) {
++            uart_irq_tx_disable(uart_dev);
+         }
+     }
+ }
 diff --git a/app/src/usb_hid_next.c b/app/src/usb_hid_next.c
 new file mode 100644
 index 0000000..6b62c41
