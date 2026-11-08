@@ -22,7 +22,9 @@ SPDX-License-Identifier: MIT
 """
 
 import argparse
+import copy
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -35,6 +37,8 @@ PID = 0x615E
 USAGE_PAGE = 0xFF60
 REPORT_SIZE = 32
 MAGIC, VERSION, PORTS, MEDIA, NOTIF = 0x53, 0x01, 0x02, 0x03, 0x04
+APP_NAME, APP_ICON, LAUNCH = 0x05, 0x06, 0x10
+APPS_MAX = 16
 PORT_TEXT = 28
 F_CPU, F_GPU, F_VOLUME, F_TIME, F_MUTED, F_IGPU, F_NET = 1, 2, 4, 8, 16, 32, 64
 
@@ -143,7 +147,8 @@ class Volume:
             return None, False
 
 
-def collect(volume, warn=print):
+def collect(volume, on=None):
+    on = on or {}
     data = dict(cpu_load=None, cpu_temp=None, gpu_load=None, gpu_temp=None, igpu_load=None)
     try:
         data.update({k: v for k, v in read_lhm().items() if v is not None})
@@ -162,7 +167,13 @@ def collect(volume, warn=print):
                 data["gpu_load"], data["gpu_temp"] = nv
         except Exception:
             pass
-    data["volume"], data["muted"] = volume.read()
+    data["volume"], data["muted"] = volume.read() if on.get("volume", True) else (None, False)
+    if not on.get("cpu", True):
+        data["cpu_load"] = data["cpu_temp"] = None
+    if not on.get("gpu", True):
+        data["gpu_load"] = data["gpu_temp"] = None
+    if not on.get("igpu", True):
+        data["igpu_load"] = None
     data["time"] = time.localtime()
     return data
 
@@ -404,6 +415,94 @@ class Notifications:
         return frames
 
 
+# ---------- ustawienia ----------
+
+DATA_KEYS = ("cpu", "gpu", "igpu", "volume", "net", "media", "ports", "notifications")
+DEFAULT_CONFIG = {
+    "data": {k: k != "notifications" for k in DATA_KEYS},
+    "apps": [],  # {"name", "path", "style", "invert", "icon"(opcjonalny obrazek)}
+}
+
+
+def config_path():
+    base = os.environ.get("APPDATA") or os.path.expanduser("~/.config")
+    return os.path.join(base, "S2mini60", "config.json")
+
+
+def load_config():
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
+    try:
+        with open(config_path(), encoding="utf-8") as f:
+            saved = json.load(f)
+        cfg["data"].update({k: bool(v) for k, v in saved.get("data", {}).items() if k in DATA_KEYS})
+        cfg["apps"] = [a for a in saved.get("apps", []) if isinstance(a, dict) and a.get("path")][:APPS_MAX]
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"config: {e}")
+    return cfg
+
+
+def save_config(cfg):
+    path = config_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+# ---------- szybki start ----------
+
+def app_icon_bits(app):
+    """128 B ikony aplikacji w stylu z ustawień."""
+    import icons
+    src = icons.extract_icon(app.get("icon") or app["path"])
+    return icons.pack_bits(icons.to_keyboard(src, app.get("style", "auto"), app.get("invert", False)))
+
+
+def app_frames(apps, icon_cache):
+    """Ramki 0x05 (nazwa) i 0x06 (5 kawałków ikony) dla każdej aplikacji; pusta lista = jedna ramka."""
+    frames = []
+    count = min(len(apps), APPS_MAX)
+    if count == 0:
+        b = bytearray(REPORT_SIZE)
+        b[0], b[1], b[2], b[3] = MAGIC, APP_NAME, 0, 0
+        return [bytes(b)]
+    for i, app in enumerate(apps[:APPS_MAX]):
+        b = bytearray(REPORT_SIZE)
+        b[0], b[1], b[2], b[3] = MAGIC, APP_NAME, i, count
+        raw = to_ascii(app.get("name") or os.path.splitext(os.path.basename(app["path"]))[0]).encode("ascii")[:PORT_TEXT]
+        b[4:4 + len(raw)] = raw
+        frames.append(bytes(b))
+        key = (app["path"], app.get("icon"), app.get("style", "auto"), bool(app.get("invert")))
+        if key not in icon_cache:
+            try:
+                icon_cache[key] = app_icon_bits(app)
+            except Exception:
+                icon_cache[key] = bytes(128)
+        bits = icon_cache[key]
+        for chunk in range(5):
+            b = bytearray(REPORT_SIZE)
+            b[0], b[1], b[2], b[3] = MAGIC, APP_ICON, i, chunk
+            part = bits[chunk * 28:(chunk + 1) * 28]
+            b[4:4 + len(part)] = part
+            frames.append(bytes(b))
+    return frames
+
+
+def launch_app(app, log=print):
+    path = app.get("path")
+    try:
+        if os.name == "nt":
+            os.startfile(path)
+        else:
+            subprocess.Popen(["xdg-open", path])
+        log(f"launch {path}")
+    except Exception as e:
+        log(f"launch failed: {path}: {e}")
+
+
 # ---------- klawiatura ----------
 
 def open_keyboard():
@@ -417,9 +516,14 @@ def open_keyboard():
 
 
 class Sender(threading.Thread):
-    def __init__(self, console=False, dry_run=False, notifications=True):
+    def __init__(self, console=False, dry_run=False, notifications=None, config=None):
         super().__init__(daemon=True)
-        self.notifications = notifications
+        self.config = config or load_config()
+        if notifications is not None:
+            self.config["data"]["notifications"] = notifications
+        self.config_version = 0
+        self.last_line = ""
+        self.launches = 0
         self.console, self.dry_run = console, dry_run
         self.stop_event = threading.Event()
         self.status = "starting"
@@ -428,11 +532,35 @@ class Sender(threading.Thread):
         if self.console:
             print(*a, flush=True)
 
+    def set_config(self, cfg):
+        """Nowe ustawienia z okna (lista aplikacji wysyłana od razu)."""
+        self.config = copy.deepcopy(cfg)
+        self.config_version += 1
+
+    def _poll_launch(self, dev, seconds):
+        """Czeka do `seconds`, czytając raporty z klawiatury (prośby o uruchomienie)."""
+        end = time.monotonic() + seconds
+        while not self.stop_event.is_set():
+            left = end - time.monotonic()
+            if left <= 0:
+                return
+            if dev is None:
+                self.stop_event.wait(left)
+                return
+            data = dev.read(64, int(min(left, 0.1) * 1000))
+            if data and len(data) >= 3 and data[0] == MAGIC and data[1] == LAUNCH:
+                apps = self.config.get("apps", [])
+                if data[2] < len(apps):
+                    self.launches += 1
+                    launch_app(apps[data[2]], self.log)
+
     def run(self):
         volume = Volume()
         net = NetRate()
         media = Media()
-        notes = Notifications() if self.notifications else None
+        notes = Notifications()
+        icon_cache = {}
+        sent_version = -1
         dev = None
         try:
             import psutil
@@ -441,18 +569,25 @@ class Sender(threading.Thread):
             pass
         tick = 0
         while not self.stop_event.is_set():
-            data = collect(volume)
-            data["net"] = net.read()
+            on = self.config["data"]
+            data = collect(volume, on)
+            data["net"] = net.read() if on.get("net", True) else None
             payloads = [frame(data)]
-            m = media.read()
+            m = media.read() if on.get("media", True) else None
             if m is not None:
                 payloads += media_frames(*m)
                 data["media"] = m
-            if notes is not None and tick % 2 == 1:
+            if on.get("notifications") and tick % 2 == 1:
                 for app, title, body in notes.read():
                     payloads += notes.frames(app, title, body)
                     data["notif"] = to_ascii(app)
-            if tick % 2 == 0:
+            elif not on.get("notifications"):
+                notes.seen = None  # po włączeniu nie wysyłaj starych
+            # lista aplikacji: po zmianie, po podłączeniu i co 20 s
+            if sent_version != self.config_version or tick % 20 == 0:
+                payloads += app_frames(self.config.get("apps", []), icon_cache)
+                sent_version = self.config_version
+            if tick % 2 == 0 and on.get("ports", True):
                 ports = list_com_ports()
                 if ports is not None:
                     payloads += port_frames(ports)
@@ -466,12 +601,15 @@ class Sender(threading.Thread):
                         dev = open_keyboard()
                         self.status = "connected" if dev else "keyboard not found"
                         self.log(self.status)
+                        if dev is not None:
+                            payloads += app_frames(self.config.get("apps", []), icon_cache)
                     if dev is not None:
                         # Windows/hidapi: pierwszy bajt to numer raportu (0 = bez numeru).
                         for payload in payloads:
                             if dev.write(b"\x00" + payload) < 0:
                                 raise OSError("write failed")
-                        self.log(fmt(data))
+                        self.last_line = fmt(data)
+                        self.log(self.last_line)
                 except Exception as e:
                     self.status = f"error: {e}"
                     self.log(self.status)
@@ -480,7 +618,15 @@ class Sender(threading.Thread):
                     except Exception:
                         pass
                     dev = None
-            self.stop_event.wait(1.0)
+            try:
+                self._poll_launch(dev, 1.0)
+            except Exception as e:
+                self.log(f"read: {e}")
+                try:
+                    dev and dev.close()
+                except Exception:
+                    pass
+                dev = None
 
 
 def fmt(d):
@@ -524,7 +670,7 @@ def main():
     args = ap.parse_args()
 
     sender = Sender(console=args.console or args.dry_run, dry_run=args.dry_run,
-                    notifications=not args.no_notifications)
+                    notifications=False if args.no_notifications else None)
     sender.start()
     if args.console or args.dry_run:
         try:
