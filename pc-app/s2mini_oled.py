@@ -297,6 +297,35 @@ def to_ascii(text):
     return " ".join(text.split())
 
 
+class Background:
+    """Wywołuje fn() co `every` s w osobnym wątku; read() zwraca ostatni wynik bez czekania.
+
+    Zapytania Windows (winrt) potrafią się zawiesić; wtedy blokują tylko ten wątek, a wysyłanie
+    do klawiatury idzie dalej. Wynik starszy niż `max_age` s uznajemy za brak danych.
+    """
+
+    def __init__(self, fn, every=1.0, max_age=5.0):
+        self.fn, self.every, self.max_age = fn, every, max_age
+        self.value, self.at = None, 0.0
+        self.wanted = True
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _loop(self):
+        while True:
+            if self.wanted:
+                try:
+                    v = self.fn()
+                except Exception:
+                    v = None
+                self.value, self.at = v, time.monotonic()
+            time.sleep(self.every)
+
+    def read(self):
+        if time.monotonic() - self.at > self.max_age:
+            return None
+        return self.value
+
+
 class Media:
     """Tytuł, wykonawca i stan odtwarzania z Windows (GSMTC). Bez pakietów winrt zwraca None."""
 
@@ -327,7 +356,7 @@ class Media:
             return (state, props.title or "", props.artist or "")
 
         try:
-            return asyncio.run(get())
+            return asyncio.run(asyncio.wait_for(get(), 3))
         except Exception:
             return None
 
@@ -389,7 +418,7 @@ class Notifications:
             return out
 
         try:
-            items = asyncio.run(get())
+            items = asyncio.run(asyncio.wait_for(get(), 3))
         except Exception:
             return []
         if items is None:
@@ -557,8 +586,11 @@ class Sender(threading.Thread):
     def run(self):
         volume = Volume()
         net = NetRate()
-        media = Media()
+        media = Background(Media().read, every=1.0)
         notes = Notifications()
+        new_notes = []
+        notes_bg = Background(lambda: new_notes.extend(notes.read()) if self.config["data"].get("notifications") else None,
+                              every=2.0)
         icon_cache = {}
         sent_version = -1
         dev = None
@@ -577,12 +609,14 @@ class Sender(threading.Thread):
             if m is not None:
                 payloads += media_frames(*m)
                 data["media"] = m
-            if on.get("notifications") and tick % 2 == 1:
-                for app, title, body in notes.read():
+            if on.get("notifications"):
+                while new_notes:
+                    app, title, body = new_notes.pop(0)
                     payloads += notes.frames(app, title, body)
                     data["notif"] = to_ascii(app)
-            elif not on.get("notifications"):
+            else:
                 notes.seen = None  # po włączeniu nie wysyłaj starych
+                new_notes.clear()
             # lista aplikacji: po zmianie, po podłączeniu i co 20 s
             if sent_version != self.config_version or tick % 20 == 0:
                 payloads += app_frames(self.config.get("apps", []), icon_cache)
