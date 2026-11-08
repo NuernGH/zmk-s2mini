@@ -57,6 +57,9 @@ int s2mini_screen_view(void);
 void s2mini_screen_view_step(int delta);
 
 /* Ostatnie dane z PC. Zwraca false, gdy jeszcze nic nie przyszło. age_ms = wiek danych. */
+/* Szybkość pisania (słowa/min) liczona z samych zwykłych klawiszy, średnia z 10 s. */
+int s2mini_wpm_get(void);
+
 bool s2mini_pc_data_get(struct s2mini_pc_data *out, int64_t *age_ms);
 
 /*

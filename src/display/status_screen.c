@@ -24,9 +24,6 @@
 #include <zmk/display/status_screen.h>
 #include <zmk/keymap.h>
 #include <zmk/hid_indicators.h>
-#if IS_ENABLED(CONFIG_ZMK_WPM)
-#include <zmk/wpm.h>
-#endif
 #include <s2mini/status.h>
 
 LV_FONT_DECLARE(s2m_font_9);
@@ -402,12 +399,10 @@ static void status_bar_update(struct status_bar *b, const char *clock, const cha
 }
 
 static void wpm_update(lv_obj_t *l, bool show_wpm) {
-#if IS_ENABLED(CONFIG_ZMK_WPM)
     if (show_wpm) {
-        lv_label_set_text_fmt(l, "%d wpm", zmk_wpm_get_state());
+        lv_label_set_text_fmt(l, "%d wpm", s2mini_wpm_get());
         return;
     }
-#endif
     lv_label_set_text(l, "");
 }
 
