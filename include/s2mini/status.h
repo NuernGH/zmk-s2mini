@@ -21,6 +21,7 @@ int64_t s2mini_knob_mode_changed_at(void);
 #define S2MINI_PC_TIME BIT(3)
 #define S2MINI_PC_MUTED BIT(4)
 #define S2MINI_PC_IGPU BIT(5) /* zintegrowane GPU (Intel), tylko obciążenie */
+#define S2MINI_PC_NET BIT(6)  /* prędkość sieci */
 
 struct s2mini_pc_data {
     uint8_t flags;
@@ -33,6 +34,8 @@ struct s2mini_pc_data {
     uint8_t minute;
     uint8_t second;
     uint8_t igpu_load; /* % */
+    uint16_t net_down; /* KB/s */
+    uint16_t net_up;   /* KB/s */
 };
 
 /* Porty COM z PC (ramka 0x02). */
@@ -45,9 +48,22 @@ struct s2mini_pc_data {
  */
 int s2mini_ports_get(char out[][S2MINI_PORT_TEXT], int max, int64_t *age_ms, int64_t *added_at);
 
+/* Co gra na PC (ramka 0x03). Tekst tylko ASCII (program PC zamienia polskie litery). */
+#define S2MINI_MEDIA_TEXT 29
+enum s2mini_media_status { S2MINI_MEDIA_NONE, S2MINI_MEDIA_PLAYING, S2MINI_MEDIA_PAUSED };
+struct s2mini_media {
+    uint8_t status;
+    char title[S2MINI_MEDIA_TEXT];
+    char artist[S2MINI_MEDIA_TEXT];
+    int64_t changed_at; /* kiedy zmienił się tytuł (0 = nigdy) */
+};
+/* Zwraca false, gdy nic jeszcze nie przyszło. age_ms = wiek danych. */
+bool s2mini_media_get(struct s2mini_media *out, int64_t *age_ms);
+
 /* Widok ekranu wybierany przez &scr_view (CON / BAK). */
 enum s2mini_view {
     S2MINI_VIEW_MAIN,
+    S2MINI_VIEW_MEDIA,
     S2MINI_VIEW_TIMER,
     S2MINI_VIEW_PORTS,
     S2MINI_VIEW_SETTINGS,
@@ -70,7 +86,7 @@ enum s2mini_timer_state { S2MINI_TIMER_IDLE, S2MINI_TIMER_RUNNING, S2MINI_TIMER_
 
 struct s2mini_timer {
     enum s2mini_timer_state state;
-    int minutes;      /* ustawiony czas */
+    int seconds;      /* ustawiony czas */
     int remaining_ms; /* pozostało (RUNNING / PAUSED) */
     int done_ms;      /* od ilu ms minął czas (DONE) */
 };

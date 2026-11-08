@@ -1,14 +1,16 @@
 """
 Wysyła dane z PC na ekran klawiatury S2 mini 60 (ZMK, Raw HID):
 głośność, obciążenie i temperatura CPU/GPU, godzina (raz na sekundę)
-oraz listę podłączonych portów COM (co 2 s).
+oraz listę podłączonych portów COM (co 2 s), to, co gra (tytuł/wykonawca), i prędkość sieci.
 
 Źródła danych (Windows):
 - głośność: pycaw (domyślne wyjście audio),
 - CPU/GPU: LibreHardwareMonitor z włączonym „Remote Web Server” (http://localhost:8085),
   a bez niego obciążenie CPU z psutil i GPU NVIDIA z nvidia-smi (bez temperatury CPU),
 - godzina: zegar systemu,
-- porty COM: pyserial (nazwy znanych płytek po VID:PID).
+- porty COM: pyserial (nazwy znanych płytek po VID:PID),
+- co gra: Windows Media (pakiety winrt-*, opcjonalnie; bez nich ekran pokaże „nothing playing”),
+- sieć: psutil (suma wszystkich kart).
 
 Uruchomienie:  pythonw s2mini_oled.py          (ikona w zasobniku, gdy jest pystray)
                python  s2mini_oled.py --console (wypisuje wysyłane dane)
@@ -30,9 +32,9 @@ VID = 0x1D50
 PID = 0x615E
 USAGE_PAGE = 0xFF60
 REPORT_SIZE = 32
-MAGIC, VERSION, PORTS = 0x53, 0x01, 0x02
+MAGIC, VERSION, PORTS, MEDIA = 0x53, 0x01, 0x02, 0x03
 PORT_TEXT = 28
-F_CPU, F_GPU, F_VOLUME, F_TIME, F_MUTED, F_IGPU = 1, 2, 4, 8, 16, 32
+F_CPU, F_GPU, F_VOLUME, F_TIME, F_MUTED, F_IGPU, F_NET = 1, 2, 4, 8, 16, 32, 64
 
 LHM_URL = "http://localhost:8085/data.json"
 
@@ -179,6 +181,11 @@ def frame(data):
         b[7] = clamp(data["volume"])
     if data["muted"]:
         flags |= F_MUTED
+    if data.get("net") is not None:
+        flags |= F_NET
+        down, up = (max(0, min(65535, int(v))) for v in data["net"])
+        b[12:14] = down.to_bytes(2, "little")
+        b[14:16] = up.to_bytes(2, "little")
     if data.get("igpu_load") is not None:
         flags |= F_IGPU
         b[11] = clamp(data["igpu_load"])
@@ -243,6 +250,87 @@ def port_frames(labels):
     return frames
 
 
+# ---------- sieć ----------
+
+class NetRate:
+    """Prędkość sieci w KB/s (pobieranie, wysyłanie) z różnicy liczników psutil."""
+
+    def __init__(self):
+        self.last = None
+
+    def read(self):
+        try:
+            import psutil
+            c = psutil.net_io_counters()
+        except Exception:
+            return None
+        now = time.monotonic()
+        prev, self.last = self.last, (now, c.bytes_recv, c.bytes_sent)
+        if prev is None or now <= prev[0]:
+            return None
+        dt = now - prev[0]
+        return ((c.bytes_recv - prev[1]) / dt / 1000, (c.bytes_sent - prev[2]) / dt / 1000)
+
+
+# ---------- co gra ----------
+
+PL = str.maketrans("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ", "acelnoszzACELNOSZZ")
+
+
+def to_ascii(text):
+    import unicodedata
+    text = (text or "").translate(PL)
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return " ".join(text.split())
+
+
+class Media:
+    """Tytuł, wykonawca i stan odtwarzania z Windows (GSMTC). Bez pakietów winrt zwraca None."""
+
+    def __init__(self):
+        self.ok = True
+
+    def read(self):
+        if not self.ok:
+            return None
+        try:
+            import asyncio
+            from winrt.windows.media.control import (
+                GlobalSystemMediaTransportControlsSessionManager as Manager,
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
+            )
+        except Exception:
+            self.ok = False
+            return None
+
+        async def get():
+            mgr = await Manager.request_async()
+            ses = mgr.get_current_session()
+            if ses is None:
+                return (0, "", "")
+            props = await ses.try_get_media_properties_async()
+            status = ses.get_playback_info().playback_status
+            state = 1 if status == Status.PLAYING else (2 if status == Status.PAUSED else 0)
+            return (state, props.title or "", props.artist or "")
+
+        try:
+            return asyncio.run(get())
+        except Exception:
+            return None
+
+
+def media_frames(state, title, artist):
+    """Ramki 0x03: tytuł, potem wykonawca (ASCII, do 28 znaków)."""
+    frames = []
+    for field, text in ((0, title), (1, artist)):
+        b = bytearray(REPORT_SIZE)
+        b[0], b[1], b[2], b[3] = MAGIC, MEDIA, state, field
+        raw = to_ascii(text).encode("ascii")[:PORT_TEXT]
+        b[4:4 + len(raw)] = raw
+        frames.append(bytes(b))
+    return frames
+
+
 # ---------- klawiatura ----------
 
 def open_keyboard():
@@ -268,6 +356,8 @@ class Sender(threading.Thread):
 
     def run(self):
         volume = Volume()
+        net = NetRate()
+        media = Media()
         dev = None
         try:
             import psutil
@@ -277,7 +367,12 @@ class Sender(threading.Thread):
         tick = 0
         while not self.stop_event.is_set():
             data = collect(volume)
+            data["net"] = net.read()
             payloads = [frame(data)]
+            m = media.read()
+            if m is not None:
+                payloads += media_frames(*m)
+                data["media"] = m
             if tick % 2 == 0:
                 ports = list_com_ports()
                 if ports is not None:
@@ -315,6 +410,9 @@ def fmt(d):
             f"  GPU {f(d['gpu_load'], '%')} {f(d['gpu_temp'], '°C')}"
             f"  iGPU {f(d.get('igpu_load'), '%')}"
             f"  VOL {'mute' if d['muted'] else f(d['volume'], '%')}"
+            + (f"  NET {d['net'][0]:.0f}/{d['net'][1]:.0f} KB/s" if d.get("net") else "")
+            + (f"  MEDIA {['-', 'play', 'pause'][d['media'][0]]} {to_ascii(d['media'][1])!r} {to_ascii(d['media'][2])!r}"
+               if d.get("media") else "")
             + (f"  PORTS {', '.join(d['ports']) or '-'}" if "ports" in d else ""))
 
 

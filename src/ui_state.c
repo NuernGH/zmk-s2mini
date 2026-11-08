@@ -1,7 +1,7 @@
 /*
  * Minutnik i ustawienia ekranu sterowane gałką.
  *
- * Widok TIMER: obrót ustawia minuty (gdy minutnik stoi), PUSH = start / pauza.
+ * Widok TIMER: obrót ustawia czas (do 5 min co 15 s, do 1 h co minutę, do 3 h co 5 min) (gdy minutnik stoi), PUSH = start / pauza.
  * Widok SETTINGS: obrót wybiera pozycję, PUSH wchodzi w zmianę wartości (obrót zmienia),
  * kolejne PUSH zatwierdza i zapisuje w pamięci płytki.
  * Gdy minutnik dobiegnie końca, ekran miga „TIME UP” do PUSH albo przez 30 s.
@@ -21,9 +21,9 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-#define TIMER_MIN 1
-#define TIMER_MAX 99
-#define TIMER_DEFAULT 25
+#define TIMER_MIN_S 15
+#define TIMER_MAX_S (3 * 3600)
+#define TIMER_DEFAULT_S (25 * 60)
 #define DONE_SHOW_MS 30000
 
 static struct k_spinlock lock;
@@ -37,11 +37,11 @@ static struct s2mini_ui_settings cfg = {
 
 static struct {
     enum s2mini_timer_state state;
-    int minutes;
+    int seconds; /* ustawiony czas */
     int64_t end_at;    /* RUNNING: kiedy koniec */
     int remaining_ms;  /* PAUSED */
     int64_t done_at;   /* DONE: kiedy minął czas */
-} tmr = {.state = S2MINI_TIMER_IDLE, .minutes = TIMER_DEFAULT};
+} tmr = {.state = S2MINI_TIMER_IDLE, .seconds = TIMER_DEFAULT_S};
 
 static int menu_sel;
 static bool menu_edit;
@@ -62,7 +62,7 @@ void s2mini_timer_get(struct s2mini_timer *out) {
     k_spinlock_key_t key = k_spin_lock(&lock);
     timer_refresh_locked(now);
     out->state = tmr.state;
-    out->minutes = tmr.minutes;
+    out->seconds = tmr.seconds;
     out->remaining_ms = 0;
     out->done_ms = 0;
     if (tmr.state == S2MINI_TIMER_RUNNING) {
@@ -103,6 +103,19 @@ bool s2mini_ui_push_captured(void) { return s2mini_ui_knob_captured() || timer_d
 
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+/*
+ * Jeden krok gałki minutnika: do 5 min co 15 s, do godziny co minutę, dalej co 5 min.
+ * Krok w dół liczy się od strony niższego zakresu, żeby wracać po tych samych wartościach.
+ */
+static int timer_step(int sec, int dir) {
+    int probe = dir > 0 ? sec : sec - 1;
+    int step = probe < 5 * 60 ? 15 : (probe < 3600 ? 60 : 300);
+    int next = dir > 0 ? sec + step : sec - step;
+    /* wyrównanie do siatki kroku */
+    next = dir > 0 ? next - next % step : ((next + step - 1) / step) * step;
+    return clampi(next, TIMER_MIN_S, TIMER_MAX_S);
+}
+
 static void setting_change_locked(int item, int delta) {
     switch (item) {
     case S2MINI_SET_BRIGHTNESS:
@@ -142,7 +155,21 @@ void s2mini_ui_knob(int delta) {
     if (view == S2MINI_VIEW_TIMER) {
         /* Czas da się zmienić, gdy minutnik stoi (zmiana w pauzie zaczyna od nowa). */
         if (tmr.state != S2MINI_TIMER_RUNNING) {
-            tmr.minutes = clampi(tmr.minutes + delta, TIMER_MIN, TIMER_MAX);
+            /* Przyspieszanie: szybkie kroki w tę samą stronę (co < 150 ms) mnożą skok, do ×8. */
+            static int64_t last_at;
+            static int last_dir, streak;
+            int dir = delta > 0 ? 1 : -1;
+            if (dir == last_dir && now - last_at < 150) {
+                streak++;
+            } else {
+                streak = 0;
+            }
+            last_dir = dir;
+            last_at = now;
+            int mult = MIN(1 + streak / 3, 8);
+            for (int i = 0; i < (delta > 0 ? delta : -delta) * mult; i++) {
+                tmr.seconds = timer_step(tmr.seconds, delta > 0 ? 1 : -1);
+            }
             tmr.state = S2MINI_TIMER_IDLE;
         }
     } else if (view == S2MINI_VIEW_SETTINGS) {
@@ -168,7 +195,7 @@ void s2mini_ui_push(void) {
     } else if (view == S2MINI_VIEW_TIMER) {
         switch (tmr.state) {
         case S2MINI_TIMER_IDLE:
-            tmr.end_at = now + (int64_t)tmr.minutes * 60 * 1000;
+            tmr.end_at = now + (int64_t)tmr.seconds * 1000;
             tmr.state = S2MINI_TIMER_RUNNING;
             break;
         case S2MINI_TIMER_RUNNING:

@@ -36,6 +36,7 @@ LV_FONT_DECLARE(s2m_font_20);
 #define BAR_H 12
 #define POPUP_MS 1500
 #define PORTS_POPUP_MS 3000
+#define MEDIA_POPUP_MS 4000
 #define PORT_ROWS 4
 #define PC_TIMEOUT_MS CONFIG_S2MINI_STATUS_PC_TIMEOUT_MS
 
@@ -53,6 +54,7 @@ enum view {
     VIEW_TIMER,
     VIEW_SETTINGS,
     VIEW_DONE,
+    VIEW_MEDIA,
     VIEW_COUNT
 };
 
@@ -103,6 +105,9 @@ static lv_obj_t *s_hint;
 
 /* 9. koniec minutnika */
 static lv_obj_t *d_box, *d_title, *d_hint;
+
+/* 10. co gra + sieć */
+static lv_obj_t *md_state, *md_title, *md_artist, *md_net;
 
 /* 5. porty COM */
 static lv_obj_t *p_count, *p_rows[PORT_ROWS];
@@ -330,6 +335,82 @@ static void update_ports(void) {
     }
 }
 
+static void create_media(lv_obj_t *v) {
+    top_bar(v);
+    label(v, &s2m_font_9, true, LV_ALIGN_TOP_LEFT, 2, 1, "NOW PLAYING");
+    md_state = label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
+    md_title = label(v, &s2m_font_14, false, LV_ALIGN_TOP_LEFT, 0, 14, "");
+    lv_obj_set_width(md_title, W);
+    lv_label_set_long_mode(md_title, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    md_artist = label(v, &s2m_font_11, false, LV_ALIGN_TOP_LEFT, 0, 32, "");
+    lv_obj_set_width(md_artist, W);
+    lv_label_set_long_mode(md_artist, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    md_net = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_LEFT, 0, 0, "");
+}
+
+/* Ustawia tekst tylko przy zmianie, bo każde ustawienie restartuje przewijanie. */
+static void set_text_if_changed(lv_obj_t *l, const char *text) {
+    if (strcmp(lv_label_get_text(l), text) != 0) {
+        lv_label_set_text(l, text);
+    }
+}
+
+/* KB/s → "850K" / "1.2M" / "12M". */
+static void fmt_rate(char *out, size_t n, unsigned kbs) {
+    if (kbs < 1000) {
+        snprintf(out, n, "%uK", kbs);
+    } else if (kbs < 10000) {
+        snprintf(out, n, "%u.%uM", kbs / 1000, (kbs % 1000) / 100);
+    } else {
+        snprintf(out, n, "%uM", MIN(kbs / 1000, 999u));
+    }
+}
+
+static void update_media(const struct s2mini_pc_data *pc, bool have_pc) {
+    struct s2mini_media m = {0};
+    int64_t age = INT64_MAX;
+    bool ok = false;
+    char net[40], down[8], up[8];
+
+#if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
+    ok = s2mini_media_get(&m, &age) && age < PC_TIMEOUT_MS;
+#endif
+    if (!have_pc) {
+        set_text_if_changed(md_state, "");
+        set_text_if_changed(md_title, "no data from PC");
+        set_text_if_changed(md_artist, "");
+    } else if (!ok || m.status == S2MINI_MEDIA_NONE || m.title[0] == '\0') {
+        set_text_if_changed(md_state, "");
+        set_text_if_changed(md_title, "nothing playing");
+        set_text_if_changed(md_artist, "");
+    } else {
+        set_text_if_changed(md_state, m.status == S2MINI_MEDIA_PLAYING ? "PLAY" : "PAUSE");
+        set_text_if_changed(md_title, m.title);
+        set_text_if_changed(md_artist, m.artist);
+    }
+    if (have_pc && (pc->flags & S2MINI_PC_NET)) {
+        fmt_rate(down, sizeof(down), pc->net_down);
+        fmt_rate(up, sizeof(up), pc->net_up);
+        snprintf(net, sizeof(net), "down %s/s  up %s/s", down, up);
+        set_text_if_changed(md_net, net);
+    } else {
+        set_text_if_changed(md_net, "");
+    }
+}
+
+/* Nowy utwór pokazuje okienko „co gra” na kilka sekund. */
+static bool media_popup(void) {
+#if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
+    struct s2mini_media m;
+    int64_t age;
+    if (s2mini_media_get(&m, &age) && m.changed_at != 0 &&
+        k_uptime_get() - m.changed_at < MEDIA_POPUP_MS) {
+        return true;
+    }
+#endif
+    return false;
+}
+
 static bool ports_wanted(void) {
 #if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
     int64_t added_at = 0;
@@ -379,7 +460,11 @@ static void fmt_mmss(char *out, size_t n, int ms) {
     if (sec < 0) {
         sec = 0;
     }
-    snprintf(out, n, "%02d:%02d", sec / 60, sec % 60);
+    if (sec >= 3600) {
+        snprintf(out, n, "%d:%02d:%02d", sec / 3600, (sec / 60) % 60, sec % 60);
+    } else {
+        snprintf(out, n, "%02d:%02d", sec / 60, sec % 60);
+    }
 }
 
 static void status_bar_update(struct status_bar *b, const char *clock, const char *layer,
@@ -420,7 +505,7 @@ static void update_timer_view(const struct s2mini_timer *t) {
         lv_label_set_text(t_hint, "push: go  turn: reset");
         break;
     default:
-        snprintf(mmss, sizeof(mmss), "%02d:00", t->minutes);
+        fmt_mmss(mmss, sizeof(mmss), t->seconds * 1000);
         lv_label_set_text(t_state, "");
         lv_label_set_text(t_hint, "turn: set  push: start");
         break;
@@ -562,8 +647,18 @@ static void update_cb(lv_timer_t *timer) {
         update_settings_view(&c);
         show(VIEW_SETTINGS);
         return;
+    case S2MINI_VIEW_MEDIA:
+        update_media(&pc, have_pc);
+        show(VIEW_MEDIA);
+        return;
     default:
         break;
+    }
+
+    if (have_pc && !game_active() && media_popup()) {
+        update_media(&pc, have_pc);
+        show(VIEW_MEDIA);
+        return;
     }
 
     if (ports_wanted()) {
@@ -654,6 +749,7 @@ lv_obj_t *zmk_display_status_screen(void) {
     create_timer(views[VIEW_TIMER]);
     create_settings(views[VIEW_SETTINGS]);
     create_done(views[VIEW_DONE]);
+    create_media(views[VIEW_MEDIA]);
 
     update_cb(NULL);
     lv_timer_create(update_cb, 100, NULL);
