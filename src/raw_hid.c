@@ -21,6 +21,11 @@
  *   [0] 0x53  [1] 0x04  [2] numer powiadomienia  [3] pole (0 aplikacja, 1 tytuł, 2 treść)
  *   [4..31] tekst ASCII
  *
+ * Szybki start: nazwa [1] 0x05 [2] indeks [3] liczba aplikacji [4..31] nazwa ASCII,
+ *   ikona [1] 0x06 [2] indeks [3] kawałek 0..4 [4..31] do 28 B z 128 B ikony 32×32 1 bpp.
+ *   Liczba 0 = pusta lista.
+ * Do PC (raport wejściowy): [0] 0x53 [1] 0x10 [2] indeks aplikacji do uruchomienia.
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -44,6 +49,9 @@ LOG_MODULE_REGISTER(s2mini_raw_hid, CONFIG_ZMK_LOG_LEVEL);
 #define FRAME_PORTS 0x02
 #define FRAME_MEDIA 0x03
 #define FRAME_NOTIF 0x04
+#define FRAME_APP_NAME 0x05
+#define FRAME_APP_ICON 0x06
+#define FRAME_LAUNCH 0x10
 
 static const uint8_t raw_hid_desc[] = {
     0x06, 0x60, 0xFF,       /* Usage Page (Vendor 0xFF60) */
@@ -218,7 +226,92 @@ static void parse_notif(const uint8_t *buf, uint16_t len) {
     }
 }
 
+/* Szybki start: nazwy i ikony aplikacji. */
+static char app_names[S2MINI_APPS_MAX][S2MINI_APP_NAME];
+static uint8_t app_icons[S2MINI_APPS_MAX][S2MINI_ICON_BYTES];
+static int apps_count = -1;
+static uint32_t apps_version;
+
+int s2mini_apps_count(void) {
+    int n;
+    K_SPINLOCK(&lock) { n = apps_count; }
+    return n;
+}
+
+uint32_t s2mini_apps_version(void) {
+    uint32_t v;
+    K_SPINLOCK(&lock) { v = apps_version; }
+    return v;
+}
+
+bool s2mini_app_get(int index, char name[S2MINI_APP_NAME], uint8_t icon[S2MINI_ICON_BYTES]) {
+    bool ok = false;
+    K_SPINLOCK(&lock) {
+        if (index >= 0 && index < MIN(apps_count, S2MINI_APPS_MAX)) {
+            memcpy(name, app_names[index], S2MINI_APP_NAME);
+            memcpy(icon, app_icons[index], S2MINI_ICON_BYTES);
+            ok = true;
+        }
+    }
+    return ok;
+}
+
+static void parse_app_name(const uint8_t *buf, uint16_t len) {
+    int index = buf[2];
+    int count = MIN(buf[3], S2MINI_APPS_MAX);
+    char name[S2MINI_APP_NAME];
+    copy_text(name, &buf[4], len - 4);
+    K_SPINLOCK(&lock) {
+        bool changed = count != apps_count;
+        if (index < count && strcmp(app_names[index], name) != 0) {
+            memcpy(app_names[index], name, sizeof(name));
+            changed = true;
+        }
+        apps_count = count;
+        if (changed) {
+            apps_version++;
+        }
+    }
+}
+
+static void parse_app_icon(const uint8_t *buf, uint16_t len) {
+    int index = buf[2];
+    int offset = buf[3] * 28;
+    if (index >= S2MINI_APPS_MAX || offset >= S2MINI_ICON_BYTES) {
+        return;
+    }
+    int n = MIN(MIN(len - 4, 28), S2MINI_ICON_BYTES - offset);
+    K_SPINLOCK(&lock) {
+        if (memcmp(&app_icons[index][offset], &buf[4], n) != 0) {
+            memcpy(&app_icons[index][offset], &buf[4], n);
+            apps_version++;
+        }
+    }
+}
+
+int s2mini_app_launch(int index) {
+    const struct device *dev = DEVICE_DT_GET(RAW_HID_NODE);
+    static uint8_t report[RAW_HID_REPORT_SIZE];
+    memset(report, 0, sizeof(report));
+    report[0] = FRAME_MAGIC;
+    report[1] = FRAME_LAUNCH;
+    report[2] = index;
+    int err = hid_device_submit_report(dev, sizeof(report), report);
+    if (err) {
+        LOG_WRN("launch report failed: %d", err);
+    }
+    return err;
+}
+
 static void parse_frame(const uint8_t *buf, uint16_t len) {
+    if (len >= 5 && buf[0] == FRAME_MAGIC && buf[1] == FRAME_APP_NAME) {
+        parse_app_name(buf, len);
+        return;
+    }
+    if (len >= 5 && buf[0] == FRAME_MAGIC && buf[1] == FRAME_APP_ICON) {
+        parse_app_icon(buf, len);
+        return;
+    }
     if (len >= 5 && buf[0] == FRAME_MAGIC && buf[1] == FRAME_NOTIF) {
         parse_notif(buf, len);
         return;

@@ -44,6 +44,12 @@ static struct {
 } tmr = {.state = S2MINI_TIMER_IDLE, .seconds = TIMER_DEFAULT_S};
 
 static int menu_sel;
+static int launcher_sel;
+
+int s2mini_launcher_selected(void) {
+    int n = s2mini_apps_count();
+    return n > 0 ? launcher_sel % n : 0;
+}
 static bool menu_edit;
 
 /* Wołane pod blokadą: RUNNING → DONE po czasie, DONE → IDLE po DONE_SHOW_MS. */
@@ -96,7 +102,7 @@ static bool timer_done_now(void) {
 
 bool s2mini_ui_knob_captured(void) {
     int v = s2mini_screen_view();
-    return v == S2MINI_VIEW_TIMER || v == S2MINI_VIEW_SETTINGS;
+    return v == S2MINI_VIEW_TIMER || v == S2MINI_VIEW_SETTINGS || v == S2MINI_VIEW_LAUNCHER;
 }
 
 bool s2mini_ui_push_captured(void) { return s2mini_ui_knob_captured() || timer_done_now(); }
@@ -172,6 +178,11 @@ void s2mini_ui_knob(int delta) {
             }
             tmr.state = S2MINI_TIMER_IDLE;
         }
+    } else if (view == S2MINI_VIEW_LAUNCHER) {
+        int n = s2mini_apps_count();
+        if (n > 0) {
+            launcher_sel = ((launcher_sel + delta) % n + n) % n;
+        }
     } else if (view == S2MINI_VIEW_SETTINGS) {
         if (menu_edit) {
             setting_change_locked(menu_sel, delta);
@@ -189,7 +200,8 @@ void s2mini_ui_push(void) {
     k_spinlock_key_t key = k_spin_lock(&lock);
     timer_refresh_locked(now);
 
-    if (tmr.state == S2MINI_TIMER_DONE) {
+    bool was_done = tmr.state == S2MINI_TIMER_DONE;
+    if (was_done) {
         /* PUSH gasi dzwonek minutnika, niezależnie od widoku. */
         tmr.state = S2MINI_TIMER_IDLE;
     } else if (view == S2MINI_VIEW_TIMER) {
@@ -221,8 +233,12 @@ void s2mini_ui_push(void) {
             menu_edit = !menu_edit;
         }
     }
+    bool launch = view == S2MINI_VIEW_LAUNCHER && !was_done;
     k_spin_unlock(&lock, key);
 
+    if (launch && s2mini_apps_count() > 0) {
+        s2mini_app_launch(s2mini_launcher_selected());
+    }
     if (store) {
         settings_store();
     }

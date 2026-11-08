@@ -69,10 +69,25 @@ struct s2mini_notif {
 };
 void s2mini_notif_get(struct s2mini_notif *out);
 
+/*
+ * Szybki start (ramki 0x05 nazwa, 0x06 ikona): lista aplikacji z programu PC.
+ * Ikona 32×32, 1 bit na piksel, wiersz = 4 bajty, bit 7 = lewy piksel, 1 = świeci.
+ */
+#define S2MINI_APPS_MAX 16
+#define S2MINI_ICON_SIZE 32
+#define S2MINI_ICON_BYTES (S2MINI_ICON_SIZE * S2MINI_ICON_SIZE / 8)
+#define S2MINI_APP_NAME 29
+int s2mini_apps_count(void);                 /* -1 = lista jeszcze nie przyszła */
+uint32_t s2mini_apps_version(void);          /* zmienia się przy każdej zmianie listy/ikon */
+bool s2mini_app_get(int index, char name[S2MINI_APP_NAME], uint8_t icon[S2MINI_ICON_BYTES]);
+int s2mini_app_launch(int index);            /* wysyła do PC prośbę o uruchomienie */
+int s2mini_launcher_selected(void);
+
 /* Widok ekranu wybierany przez &scr_view (CON / BAK). */
 enum s2mini_view {
     S2MINI_VIEW_MAIN,
     S2MINI_VIEW_MEDIA,
+    S2MINI_VIEW_LAUNCHER,
     S2MINI_VIEW_TIMER,
     S2MINI_VIEW_PORTS,
     S2MINI_VIEW_SETTINGS,

@@ -57,6 +57,7 @@ enum view {
     VIEW_DONE,
     VIEW_MEDIA,
     VIEW_NOTIF,
+    VIEW_LAUNCHER,
     VIEW_COUNT
 };
 
@@ -112,6 +113,13 @@ static lv_obj_t *d_box, *d_title, *d_hint;
 static lv_obj_t *md_state, *md_title, *md_artist, *md_net;
 
 static void show(enum view which);
+
+/* 12. szybki start: 3 ikony (poprzednia, wybrana, następna) */
+#define ICON_SLOTS 3
+static lv_obj_t *ln_count, *ln_name, *ln_frame, *ln_hint;
+static lv_obj_t *ln_img[ICON_SLOTS];
+static uint8_t ln_px[ICON_SLOTS][S2MINI_ICON_SIZE * S2MINI_ICON_SIZE];
+static lv_image_dsc_t ln_dsc[ICON_SLOTS];
 
 /* 11. powiadomienie */
 static lv_obj_t *nt_app, *nt_title, *nt_body;
@@ -435,6 +443,97 @@ static bool notif_popup(void) {
     return false;
 }
 
+static void create_launcher(lv_obj_t *v) {
+    static const int xs[ICON_SLOTS] = {6, 48, 90};
+    top_bar(v);
+    label(v, &s2m_font_9, true, LV_ALIGN_TOP_LEFT, 2, 1, "LAUNCH");
+    ln_count = label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
+    ln_frame = box(v, 45, 13, 38, 38, false, 1);
+    for (int i = 0; i < ICON_SLOTS; i++) {
+        ln_dsc[i].header.magic = LV_IMAGE_HEADER_MAGIC;
+        ln_dsc[i].header.cf = LV_COLOR_FORMAT_A8;
+        ln_dsc[i].header.w = S2MINI_ICON_SIZE;
+        ln_dsc[i].header.h = S2MINI_ICON_SIZE;
+        ln_dsc[i].header.stride = S2MINI_ICON_SIZE;
+        ln_dsc[i].data_size = sizeof(ln_px[i]);
+        ln_dsc[i].data = ln_px[i];
+        ln_img[i] = lv_image_create(v);
+        lv_obj_set_pos(ln_img[i], xs[i], 16);
+        lv_obj_set_size(ln_img[i], S2MINI_ICON_SIZE, S2MINI_ICON_SIZE);
+        lv_obj_set_style_image_recolor(ln_img[i], fg, 0);
+        lv_obj_set_style_image_recolor_opa(ln_img[i], LV_OPA_COVER, 0);
+        lv_image_set_src(ln_img[i], &ln_dsc[i]);
+        lv_obj_add_flag(ln_img[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    ln_name = label(v, &s2m_font_9, false, LV_ALIGN_TOP_MID, 0, 53, "");
+    lv_obj_set_width(ln_name, W);
+    lv_obj_set_style_text_align(ln_name, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(ln_name, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    ln_hint = label(v, &s2m_font_9, false, LV_ALIGN_TOP_MID, 0, 26, "");
+}
+
+static void icon_to_a8(uint8_t *dst, const uint8_t *bits) {
+    for (int i = 0; i < S2MINI_ICON_SIZE * S2MINI_ICON_SIZE; i++) {
+        dst[i] = (bits[i / 8] & (0x80 >> (i % 8))) ? 0xFF : 0x00;
+    }
+}
+
+static void update_launcher(bool have_pc) {
+    static uint32_t shown_version = UINT32_MAX;
+    static int shown_sel = -1, shown_count = -2;
+    int count = -1;
+    uint32_t version = 0;
+#if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
+    count = s2mini_apps_count();
+    version = s2mini_apps_version();
+#endif
+    int sel = s2mini_launcher_selected();
+    if (!have_pc || count <= 0) {
+        for (int i = 0; i < ICON_SLOTS; i++) {
+            lv_obj_add_flag(ln_img[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_add_flag(ln_frame, LV_OBJ_FLAG_HIDDEN);
+        set_text_if_changed(ln_count, "");
+        set_text_if_changed(ln_name, "");
+        set_text_if_changed(ln_hint, !have_pc ? "no data from PC" : "add apps in PC app");
+        shown_count = -2;
+        return;
+    }
+    if (version == shown_version && sel == shown_sel && count == shown_count) {
+        return;
+    }
+    shown_version = version;
+    shown_sel = sel;
+    shown_count = count;
+    set_text_if_changed(ln_hint, "");
+    lv_obj_clear_flag(ln_frame, LV_OBJ_FLAG_HIDDEN);
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%d/%d", sel + 1, count);
+    set_text_if_changed(ln_count, buf);
+
+#if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
+    static uint8_t bits[S2MINI_ICON_BYTES];
+    char name[S2MINI_APP_NAME];
+    for (int i = 0; i < ICON_SLOTS; i++) {
+        /* przy 1–2 aplikacjach boczne miejsca zostają puste */
+        bool used = count >= 3 || i == 1 || (count == 2 && i == 2);
+        int index = ((sel + i - 1) % count + count) % count;
+        if (!used || !s2mini_app_get(index, name, bits)) {
+            lv_obj_add_flag(ln_img[i], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        icon_to_a8(ln_px[i], bits);
+        lv_image_set_src(ln_img[i], NULL);
+        lv_image_set_src(ln_img[i], &ln_dsc[i]);
+        lv_obj_invalidate(ln_img[i]);
+        lv_obj_clear_flag(ln_img[i], LV_OBJ_FLAG_HIDDEN);
+        if (i == 1) {
+            set_text_if_changed(ln_name, name);
+        }
+    }
+#endif
+}
+
 /* Nowy utwór pokazuje okienko „co gra” na kilka sekund. */
 static bool media_popup(void) {
 #if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
@@ -688,6 +787,10 @@ static void update_cb(lv_timer_t *timer) {
         update_media(&pc, have_pc);
         show(VIEW_MEDIA);
         return;
+    case S2MINI_VIEW_LAUNCHER:
+        update_launcher(have_pc);
+        show(VIEW_LAUNCHER);
+        return;
     default:
         break;
     }
@@ -792,6 +895,7 @@ lv_obj_t *zmk_display_status_screen(void) {
     create_done(views[VIEW_DONE]);
     create_media(views[VIEW_MEDIA]);
     create_notif(views[VIEW_NOTIF]);
+    create_launcher(views[VIEW_LAUNCHER]);
 
     update_cb(NULL);
     lv_timer_create(update_cb, 100, NULL);
