@@ -311,6 +311,13 @@ class Background:
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
+        # winrt potrzebuje COM w tym wątku: MTA (bez pętli komunikatów; STA z pycaw zawieszał await)
+        if os.name == "nt":
+            try:
+                import ctypes
+                ctypes.windll.ole32.CoInitializeEx(None, 0)  # COINIT_MULTITHREADED
+            except Exception:
+                pass
         while True:
             if self.wanted:
                 try:
