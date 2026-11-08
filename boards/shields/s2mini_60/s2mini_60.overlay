@@ -205,7 +205,7 @@ RC(5,0) RC(5,1) RC(5,2)
 
 &i2c0 {
     status = "okay";
-    clock-frequency = <I2C_BITRATE_FAST>;
+    clock-frequency = <I2C_BITRATE_STANDARD>; /* 100 kHz: pewniej na dłuższych przewodach do modułu */
     pinctrl-0 = <&i2c0_s2mini_60>;
     pinctrl-names = "default";
 
