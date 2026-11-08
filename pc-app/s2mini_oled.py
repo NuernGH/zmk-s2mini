@@ -457,6 +457,7 @@ DATA_KEYS = ("cpu", "gpu", "igpu", "volume", "net", "media", "ports", "notificat
 DEFAULT_CONFIG = {
     "data": {k: k != "notifications" for k in DATA_KEYS},
     "apps": [],  # {"name", "path", "style", "invert", "icon"(opcjonalny obrazek)}
+    "default_style": "auto",
 }
 
 
@@ -472,6 +473,7 @@ def load_config():
             saved = json.load(f)
         cfg["data"].update({k: bool(v) for k, v in saved.get("data", {}).items() if k in DATA_KEYS})
         cfg["apps"] = [a for a in saved.get("apps", []) if isinstance(a, dict) and a.get("path")][:APPS_MAX]
+        cfg["default_style"] = saved.get("default_style", "auto")
     except FileNotFoundError:
         pass
     except Exception as e:

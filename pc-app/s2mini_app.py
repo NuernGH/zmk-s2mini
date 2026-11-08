@@ -147,9 +147,9 @@ class AppRow(ctk.CTkFrame):
 
         opts = ctk.CTkFrame(self, fg_color="transparent")
         opts.grid(row=0, column=3, rowspan=2, padx=6)
-        self.style = ctk.CTkSegmentedButton(opts, values=[icons.STYLE_NAMES[s] for s in icons.STYLES],
-                                            command=self._style, height=26)
-        self.style.set(icons.STYLE_NAMES[app.get("style", "auto")])
+        self.style = ctk.CTkButton(opts, text=f"Styl: {icons.STYLE_NAMES.get(app.get('style', 'auto'), 'Auto')}  ▾",
+                                   height=26, width=170, fg_color=CARD_HI,
+                                   command=lambda: StylePicker(window, index, src))
         self.style.pack(pady=(0, 4))
         row2 = ctk.CTkFrame(opts, fg_color="transparent")
         row2.pack(fill="x")
@@ -172,10 +172,6 @@ class AppRow(ctk.CTkFrame):
         if name != self.app.get("name", ""):
             self.window.update_app(self.index, name=name)
 
-    def _style(self, label):
-        key = next(k for k, v in icons.STYLE_NAMES.items() if v == label)
-        self.window.update_app(self.index, style=key, rebuild=True)
-
     def _invert(self):
         self.window.update_app(self.index, invert=bool(self.inv.get()), rebuild=True)
 
@@ -184,6 +180,47 @@ class AppRow(ctk.CTkFrame):
             ("Obrazki", "*.png *.ico *.jpg *.jpeg *.bmp *.gif"), ("Wszystkie", "*.*")])
         if path:
             self.window.update_app(self.index, icon=path, rebuild=True)
+
+
+class StylePicker(ctk.CTkToplevel):
+    """Wszystkie style ikony jednej aplikacji obok siebie (jak na OLED); kliknięcie wybiera."""
+
+    def __init__(self, window, index, src):
+        super().__init__(window)
+        self.window, self.index = window, index
+        app = window.cfg["apps"][index]
+        self.title(f"Styl ikony: {app.get('name') or app['path']}")
+        self.configure(fg_color=BG)
+        self.resizable(False, False)
+        self.after(50, self.grab_set)
+        current = app.get("style", "auto")
+        grid = ctk.CTkFrame(self, fg_color="transparent")
+        grid.pack(padx=16, pady=(16, 8))
+        for i, key in enumerate(icons.STYLES):
+            pv = icons.preview(icons.to_keyboard(src, key, app.get("invert", False)), 3)
+            cell = ctk.CTkFrame(grid, fg_color=CARD_HI if key == current else CARD, corner_radius=10,
+                                border_width=2, border_color=ACCENT if key == current else CARD)
+            cell.grid(row=i // 4, column=i % 4, padx=6, pady=6)
+            b = ctk.CTkButton(cell, text="", image=ctk_image(pv, (96, 96)), width=104, height=104,
+                              fg_color="#05070a", hover_color="#1b2230", command=lambda k=key: self.pick(k))
+            b.pack(padx=6, pady=(6, 2))
+            ctk.CTkLabel(cell, text=icons.STYLE_NAMES[key]).pack(pady=(0, 6))
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=16, pady=(0, 16))
+        self.all = ctk.CTkCheckBox(row, text="Ustaw dla wszystkich aplikacji")
+        self.all.pack(side="left")
+        ctk.CTkButton(row, text="Anuluj", width=90, fg_color=CARD_HI, command=self.destroy).pack(side="right")
+
+    def pick(self, key):
+        if self.all.get():
+            for a in self.window.cfg["apps"]:
+                a["style"] = key
+            self.window.cfg["default_style"] = key
+            self.window._save()
+            self.window._rebuild_apps()
+        else:
+            self.window.update_app(self.index, style=key, rebuild=True)
+        self.destroy()
 
 
 class StartMenuPicker(ctk.CTkToplevel):
@@ -290,6 +327,13 @@ class Window(ctk.CTk):
                 sw.select()
             sw.pack(anchor="w", padx=18, pady=8)
             self.switches[key] = sw
+        card3 = ctk.CTkFrame(page, fg_color=CARD, corner_radius=12)
+        card3.pack(fill="x", pady=(14, 0))
+        ctk.CTkLabel(card3, text="Domyślny styl ikon nowych aplikacji").pack(side="left", padx=18, pady=12)
+        self.default_style = ctk.CTkOptionMenu(card3, values=[icons.STYLE_NAMES[s] for s in icons.STYLES],
+                                               command=self._default_style)
+        self.default_style.set(icons.STYLE_NAMES.get(self.cfg.get("default_style", "auto"), "Auto"))
+        self.default_style.pack(side="left", padx=8)
         card2 = ctk.CTkFrame(page, fg_color=CARD, corner_radius=12)
         card2.pack(fill="x", pady=14)
         self.auto = ctk.CTkSwitch(card2, text="Uruchamiaj razem z Windows", command=self._autostart)
@@ -334,7 +378,8 @@ class Window(ctk.CTk):
         if len(self.cfg["apps"]) >= core.APPS_MAX:
             return
         name = name or os.path.splitext(os.path.basename(path))[0]
-        self.cfg["apps"].append({"name": name, "path": path, "style": "auto", "invert": False})
+        self.cfg["apps"].append({"name": name, "path": path, "style": self.cfg.get("default_style", "auto"),
+                                 "invert": False})
         self._save()
         self._rebuild_apps()
 
@@ -367,6 +412,10 @@ class Window(ctk.CTk):
     def _data_changed(self):
         for key, sw in self.switches.items():
             self.cfg["data"][key] = bool(sw.get())
+        self._save()
+
+    def _default_style(self, label):
+        self.cfg["default_style"] = next(k for k, v in icons.STYLE_NAMES.items() if v == label)
         self._save()
 
     def _autostart(self):
