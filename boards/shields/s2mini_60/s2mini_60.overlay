@@ -232,9 +232,29 @@ RC(5,0) RC(5,1) RC(5,2)
     };
 };
 
-/* UART0 płytki używa IO16/IO17, a tu są to BAK i kolumna K13 */
+/*
+ * UART0 płytki używa IO16/IO17, a tu są to BAK i kolumna K13. Konsoli nie wolno jednak
+ * wyłączać: bez niej CONFIG_ESP_CONSOLE_UART_NUM = -1, a program startowy Zephyra woła
+ * esp_rom_output_tx_wait_idle(-1) i zawiesza się, zanim wystartuje system.
+ * Dlatego UART0 idzie na GPIO43/44, które na S2 mini nie są wyprowadzone.
+ */
+&pinctrl {
+    uart0_s2mini_60: uart0_s2mini_60 {
+        group1 {
+            pinmux = <UART0_TX_GPIO43>;
+            output-high;
+        };
+        group2 {
+            pinmux = <UART0_RX_GPIO44>;
+            bias-pull-up;
+        };
+    };
+};
+
 &uart0 {
-    status = "disabled";
+    status = "okay";
+    pinctrl-0 = <&uart0_s2mini_60>;
+    pinctrl-names = "default";
 };
 
 /* Przycisk 0 płytki nie jest częścią klawiatury */
