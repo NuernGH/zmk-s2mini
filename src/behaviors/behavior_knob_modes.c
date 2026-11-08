@@ -13,6 +13,9 @@
 
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
+#include <zmk/events/keycode_state_changed.h>
+#include <dt-bindings/zmk/keys.h>
+#include <string.h>
 #include <s2mini/status.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -73,6 +76,17 @@ static int knob_accept_data(struct zmk_behavior_binding *binding,
     atomic_set(&captured, 0);
 #endif
     int mode = atomic_get(&current_mode);
+#if IS_ENABLED(CONFIG_S2MINI_STATUS_SCREEN)
+    /* Widok NOW PLAYING: gałka zawsze przełącza utwory (tryb TRACK), bez zmiany trybu. */
+    if (s2mini_screen_view() == S2MINI_VIEW_MEDIA) {
+        for (int i = 0; i < ARRAY_SIZE(mode_names); i++) {
+            if (strcmp(mode_names[i], "TRACK") == 0) {
+                mode = i;
+                break;
+            }
+        }
+    }
+#endif
     atomic_set(&pending_mode, mode);
     struct zmk_behavior_binding target = mode_binding(mode);
     return behavior_sensor_keymap_binding_accept_data(&target, event, sensor_config,
@@ -101,9 +115,16 @@ BEHAVIOR_DT_DEFINE(KNOB_NODE, NULL, NULL, NULL, NULL, POST_KERNEL,
 
 #if DT_NODE_EXISTS(NEXT_NODE)
 
+static bool push_play_pause; /* PUSH na NOW PLAYING wysłał play/pauzę, puszczenie ją zwalnia */
+
 static int knob_next_pressed(struct zmk_behavior_binding *binding,
                              struct zmk_behavior_binding_event event) {
 #if IS_ENABLED(CONFIG_S2MINI_STATUS_SCREEN)
+    /* Widok NOW PLAYING: PUSH = play/pauza. */
+    if (!s2mini_ui_push_captured() && s2mini_screen_view() == S2MINI_VIEW_MEDIA) {
+        push_play_pause = true;
+        return raise_zmk_keycode_state_changed_from_encoded(C_PP, true, event.timestamp);
+    }
     /* Na widokach minutnika i ustawień (albo gdy dzwoni minutnik) PUSH zatwierdza. */
     if (s2mini_ui_push_captured()) {
         s2mini_ui_push();
@@ -119,6 +140,10 @@ static int knob_next_pressed(struct zmk_behavior_binding *binding,
 
 static int knob_next_released(struct zmk_behavior_binding *binding,
                               struct zmk_behavior_binding_event event) {
+    if (push_play_pause) {
+        push_play_pause = false;
+        return raise_zmk_keycode_state_changed_from_encoded(C_PP, false, event.timestamp);
+    }
     return ZMK_BEHAVIOR_OPAQUE;
 }
 
