@@ -634,7 +634,9 @@ def app_frames(apps, icon_cache):
 def launch_app(app, log=print):
     path = app.get("path")
     try:
-        if os.name == "nt":
+        if os.name == "nt" and path.lower().startswith("shell:appsfolder"):
+            subprocess.Popen(["explorer.exe", path])  # aplikacja ze Sklepu / MSIX
+        elif os.name == "nt":
             os.startfile(path)
         else:
             subprocess.Popen(["xdg-open", path])

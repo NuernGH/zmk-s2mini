@@ -167,10 +167,59 @@ def _draw_icon_windows(path, size):
     return out
 
 
+APPS_FOLDER = "shell:AppsFolder\\"
+
+
+def _appx_logo(aumid):
+    """Plik logo aplikacji MSIX (największy wariant PNG) z jej AppxManifest.xml albo None."""
+    import glob
+    import re
+    import subprocess
+    import xml.etree.ElementTree as ET
+    pfn, _, app_id = aumid.partition("!")
+    r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                        f"(Get-AppxPackage | Where-Object PackageFamilyName -eq '{pfn}' | Select-Object -First 1).InstallLocation"],
+                       capture_output=True, timeout=15, creationflags=0x08000000)
+    loc = r.stdout.decode("utf-8", "replace").strip()
+    if not loc:
+        return None
+    root = ET.parse(os.path.join(loc, "AppxManifest.xml")).getroot()
+    logos = []
+    for app in root.iter():
+        if app.tag.endswith("}Application") and app.get("Id") == app_id:
+            for el in app.iter():
+                for attr in ("Square44x44Logo", "Square150x150Logo", "Logo"):
+                    if el.get(attr):
+                        logos.append(el.get(attr))
+    for el in root.iter():
+        if el.tag.endswith("}Logo") and el.text:
+            logos.append(el.text)
+    for logo in logos:
+        base, ext = os.path.splitext(os.path.join(loc, logo))
+        cands = glob.glob(base + "*" + ext) + ([base + ext] if os.path.exists(base + ext) else [])
+        if not cands:
+            continue
+
+        def rank(f):
+            m = re.search(r"(targetsize|scale)-(\d+)", f)
+            n = int(m.group(2)) if m else 0
+            plain = "altform" not in f and "contrast" not in f
+            return (plain, n if m and m.group(1) == "targetsize" else n // 4)
+
+        return max(cands, key=rank)
+    return None
+
+
 def extract_icon(path, size=64):
     """Kolorowa ikona aplikacji (RGBA) albo None. Obrazek (.png/.ico/.jpg) bierze wprost."""
     if not path:
         return None
+    if path.startswith(APPS_FOLDER):
+        try:
+            logo = _appx_logo(path[len(APPS_FOLDER):])
+            return extract_icon(logo, size) if logo else None
+        except Exception:
+            return None
     ext = os.path.splitext(path)[1].lower()
     if ext in (".png", ".ico", ".jpg", ".jpeg", ".bmp", ".gif"):
         try:

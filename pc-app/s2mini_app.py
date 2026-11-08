@@ -99,7 +99,30 @@ def start_menu_shortcuts():
                 continue
             seen.add(name.lower())
             out.append((name, path))
+    # aplikacje ze Sklepu / MSIX (np. Claude) nie mają pliku .lnk — bierzemy je z Get-StartApps
+    for name, aumid in store_apps():
+        if name.lower() not in seen and not any(s in name.lower() for s in skip):
+            seen.add(name.lower())
+            out.append((name, icons.APPS_FOLDER + aumid))
     return sorted(out, key=lambda x: x[0].lower())
+
+
+def store_apps():
+    """(nazwa, AppUserModelID) aplikacji spakowanych (MSIX/Sklep) z menu Start."""
+    if os.name != "nt":
+        return []
+    import json
+    import subprocess
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-StartApps | ConvertTo-Json -Compress"],
+                           capture_output=True, timeout=15, creationflags=0x08000000)
+        data = json.loads(r.stdout.decode("utf-8", "replace") or "[]")
+    except Exception:
+        return []
+    if isinstance(data, dict):
+        data = [data]
+    return [(d.get("Name", ""), d.get("AppID", "")) for d in data if "!" in (d.get("AppID") or "")]
 
 
 # ---------- obrazki ----------
