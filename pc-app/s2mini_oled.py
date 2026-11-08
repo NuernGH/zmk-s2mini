@@ -10,7 +10,9 @@ oraz listę podłączonych portów COM (co 2 s), to, co gra (tytuł/wykonawca), 
 - godzina: zegar systemu,
 - porty COM: pyserial (nazwy znanych płytek po VID:PID),
 - co gra: Windows Media (pakiety winrt-*, opcjonalnie; bez nich ekran pokaże „nothing playing”),
-- sieć: psutil (suma wszystkich kart).
+- sieć: psutil (suma wszystkich kart),
+- powiadomienia: Windows UserNotificationListener (te same pakiety winrt + UI.Notifications);
+  na ekran idzie aplikacja, tytuł i początek treści nowego powiadomienia (--no-notifications wyłącza).
 
 Uruchomienie:  pythonw s2mini_oled.py          (ikona w zasobniku, gdy jest pystray)
                python  s2mini_oled.py --console (wypisuje wysyłane dane)
@@ -32,7 +34,7 @@ VID = 0x1D50
 PID = 0x615E
 USAGE_PAGE = 0xFF60
 REPORT_SIZE = 32
-MAGIC, VERSION, PORTS, MEDIA = 0x53, 0x01, 0x02, 0x03
+MAGIC, VERSION, PORTS, MEDIA, NOTIF = 0x53, 0x01, 0x02, 0x03, 0x04
 PORT_TEXT = 28
 F_CPU, F_GPU, F_VOLUME, F_TIME, F_MUTED, F_IGPU, F_NET = 1, 2, 4, 8, 16, 32, 64
 
@@ -331,6 +333,77 @@ def media_frames(state, title, artist):
     return frames
 
 
+# ---------- powiadomienia ----------
+
+class Notifications:
+    """Nowe powiadomienia Windows (toast). Pierwszy odczyt tylko zapamiętuje istniejące."""
+
+    def __init__(self):
+        self.ok = True
+        self.seen = None
+        self.seq = 0
+
+    def read(self):
+        """Zwraca listę nowych (aplikacja, tytuł, treść), najstarsze pierwsze."""
+        if not self.ok:
+            return []
+        try:
+            import asyncio
+            from winrt.windows.ui.notifications.management import UserNotificationListener
+            from winrt.windows.ui.notifications import NotificationKinds, KnownNotificationBindings
+        except Exception:
+            self.ok = False
+            return []
+
+        async def get():
+            listener = UserNotificationListener.current
+            if int(listener.get_access_status()) != 1:  # 1 = Allowed
+                if int(await listener.request_access_async()) != 1:
+                    return None
+            items = await listener.get_notifications_async(NotificationKinds.TOAST)
+            out = []
+            for n in items:
+                try:
+                    app = n.app_info.display_info.display_name
+                except Exception:
+                    app = ""
+                texts = []
+                try:
+                    binding = n.notification.visual.get_binding(KnownNotificationBindings.toast_generic)
+                    if binding is not None:
+                        texts = [t.text for t in binding.get_text_elements()]
+                except Exception:
+                    pass
+                out.append((n.id, app, texts[0] if texts else "", " ".join(texts[1:])))
+            return out
+
+        try:
+            items = asyncio.run(get())
+        except Exception:
+            return []
+        if items is None:
+            self.ok = False
+            return []
+        ids = {i[0] for i in items}
+        if self.seen is None:
+            self.seen = ids
+            return []
+        new = [i[1:] for i in items if i[0] not in self.seen]
+        self.seen = ids
+        return new[-1:]  # na ekran tylko najnowsze
+
+    def frames(self, app, title, body):
+        self.seq = (self.seq + 1) % 256
+        frames = []
+        for field, text in ((0, app), (1, title), (2, body)):
+            b = bytearray(REPORT_SIZE)
+            b[0], b[1], b[2], b[3] = MAGIC, NOTIF, self.seq, field
+            raw = to_ascii(text).encode("ascii")[:PORT_TEXT]
+            b[4:4 + len(raw)] = raw
+            frames.append(bytes(b))
+        return frames
+
+
 # ---------- klawiatura ----------
 
 def open_keyboard():
@@ -344,8 +417,9 @@ def open_keyboard():
 
 
 class Sender(threading.Thread):
-    def __init__(self, console=False, dry_run=False):
+    def __init__(self, console=False, dry_run=False, notifications=True):
         super().__init__(daemon=True)
+        self.notifications = notifications
         self.console, self.dry_run = console, dry_run
         self.stop_event = threading.Event()
         self.status = "starting"
@@ -358,6 +432,7 @@ class Sender(threading.Thread):
         volume = Volume()
         net = NetRate()
         media = Media()
+        notes = Notifications() if self.notifications else None
         dev = None
         try:
             import psutil
@@ -373,6 +448,10 @@ class Sender(threading.Thread):
             if m is not None:
                 payloads += media_frames(*m)
                 data["media"] = m
+            if notes is not None and tick % 2 == 1:
+                for app, title, body in notes.read():
+                    payloads += notes.frames(app, title, body)
+                    data["notif"] = to_ascii(app)
             if tick % 2 == 0:
                 ports = list_com_ports()
                 if ports is not None:
@@ -413,6 +492,7 @@ def fmt(d):
             + (f"  NET {d['net'][0]:.0f}/{d['net'][1]:.0f} KB/s" if d.get("net") else "")
             + (f"  MEDIA {['-', 'play', 'pause'][d['media'][0]]} {to_ascii(d['media'][1])!r} {to_ascii(d['media'][2])!r}"
                if d.get("media") else "")
+            + (f"  NOTIF {d['notif']!r}" if d.get("notif") is not None else "")
             + (f"  PORTS {', '.join(d['ports']) or '-'}" if "ports" in d else ""))
 
 
@@ -440,9 +520,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--console", action="store_true", help="bez ikony w zasobniku, wypisuje dane")
     ap.add_argument("--dry-run", action="store_true", help="tylko odczyt danych, bez klawiatury")
+    ap.add_argument("--no-notifications", action="store_true", help="nie wysyłaj powiadomień Windows na ekran")
     args = ap.parse_args()
 
-    sender = Sender(console=args.console or args.dry_run, dry_run=args.dry_run)
+    sender = Sender(console=args.console or args.dry_run, dry_run=args.dry_run,
+                    notifications=not args.no_notifications)
     sender.start()
     if args.console or args.dry_run:
         try:

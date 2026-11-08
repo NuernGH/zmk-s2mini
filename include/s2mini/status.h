@@ -60,6 +60,15 @@ struct s2mini_media {
 /* Zwraca false, gdy nic jeszcze nie przyszło. age_ms = wiek danych. */
 bool s2mini_media_get(struct s2mini_media *out, int64_t *age_ms);
 
+/* Ostatnie powiadomienie Windows (ramka 0x04): aplikacja, tytuł, treść (ASCII). */
+struct s2mini_notif {
+    char app[S2MINI_MEDIA_TEXT];
+    char title[S2MINI_MEDIA_TEXT];
+    char body[S2MINI_MEDIA_TEXT];
+    int64_t at; /* kiedy przyszło (0 = nigdy) */
+};
+void s2mini_notif_get(struct s2mini_notif *out);
+
 /* Widok ekranu wybierany przez &scr_view (CON / BAK). */
 enum s2mini_view {
     S2MINI_VIEW_MAIN,

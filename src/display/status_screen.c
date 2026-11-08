@@ -37,6 +37,7 @@ LV_FONT_DECLARE(s2m_font_20);
 #define POPUP_MS 1500
 #define PORTS_POPUP_MS 3000
 #define MEDIA_POPUP_MS 4000
+#define NOTIF_POPUP_MS 6000
 #define PORT_ROWS 4
 #define PC_TIMEOUT_MS CONFIG_S2MINI_STATUS_PC_TIMEOUT_MS
 
@@ -55,6 +56,7 @@ enum view {
     VIEW_SETTINGS,
     VIEW_DONE,
     VIEW_MEDIA,
+    VIEW_NOTIF,
     VIEW_COUNT
 };
 
@@ -108,6 +110,11 @@ static lv_obj_t *d_box, *d_title, *d_hint;
 
 /* 10. co gra + sieć */
 static lv_obj_t *md_state, *md_title, *md_artist, *md_net;
+
+static void show(enum view which);
+
+/* 11. powiadomienie */
+static lv_obj_t *nt_app, *nt_title, *nt_body;
 
 /* 5. porty COM */
 static lv_obj_t *p_count, *p_rows[PORT_ROWS];
@@ -398,6 +405,36 @@ static void update_media(const struct s2mini_pc_data *pc, bool have_pc) {
     }
 }
 
+static void create_notif(lv_obj_t *v) {
+    top_bar(v);
+    nt_app = label(v, &s2m_font_9, true, LV_ALIGN_TOP_LEFT, 2, 1, "");
+    lv_obj_set_width(nt_app, W - 4);
+    lv_label_set_long_mode(nt_app, LV_LABEL_LONG_MODE_CLIP);
+    nt_title = label(v, &s2m_font_11, false, LV_ALIGN_TOP_LEFT, 0, 15, "");
+    lv_obj_set_width(nt_title, W);
+    lv_label_set_long_mode(nt_title, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    nt_body = label(v, &s2m_font_9, false, LV_ALIGN_TOP_LEFT, 0, 32, "");
+    lv_obj_set_width(nt_body, W);
+    lv_obj_set_height(nt_body, 30);
+    lv_label_set_long_mode(nt_body, LV_LABEL_LONG_MODE_WRAP);
+}
+
+/* Nowe powiadomienie z Windows: okienko na kilka sekund. Zwraca true, gdy pokazane. */
+static bool notif_popup(void) {
+#if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
+    struct s2mini_notif n;
+    s2mini_notif_get(&n);
+    if (n.at != 0 && k_uptime_get() - n.at < NOTIF_POPUP_MS) {
+        set_text_if_changed(nt_app, n.app[0] ? n.app : "NOTIFICATION");
+        set_text_if_changed(nt_title, n.title);
+        set_text_if_changed(nt_body, n.body);
+        show(VIEW_NOTIF);
+        return true;
+    }
+#endif
+    return false;
+}
+
 /* Nowy utwór pokazuje okienko „co gra” na kilka sekund. */
 static bool media_popup(void) {
 #if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
@@ -655,6 +692,10 @@ static void update_cb(lv_timer_t *timer) {
         break;
     }
 
+    if (have_pc && !game_active() && notif_popup()) {
+        return;
+    }
+
     if (have_pc && !game_active() && media_popup()) {
         update_media(&pc, have_pc);
         show(VIEW_MEDIA);
@@ -750,6 +791,7 @@ lv_obj_t *zmk_display_status_screen(void) {
     create_settings(views[VIEW_SETTINGS]);
     create_done(views[VIEW_DONE]);
     create_media(views[VIEW_MEDIA]);
+    create_notif(views[VIEW_NOTIF]);
 
     update_cb(NULL);
     lv_timer_create(update_cb, 100, NULL);

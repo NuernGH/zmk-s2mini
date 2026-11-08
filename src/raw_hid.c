@@ -17,6 +17,10 @@
  *   [0] 0x53  [1] 0x03  [2] stan (0 nic, 1 gra, 2 pauza)  [3] pole (0 tytuł, 1 wykonawca)
  *   [4..31] tekst ASCII (do 28 znaków, reszta 0)
  *
+ * Ramka powiadomienia (trzy ramki: aplikacja, tytuł, treść; pokazane po ramce treści):
+ *   [0] 0x53  [1] 0x04  [2] numer powiadomienia  [3] pole (0 aplikacja, 1 tytuł, 2 treść)
+ *   [4..31] tekst ASCII
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -39,6 +43,7 @@ LOG_MODULE_REGISTER(s2mini_raw_hid, CONFIG_ZMK_LOG_LEVEL);
 #define FRAME_VERSION 0x01
 #define FRAME_PORTS 0x02
 #define FRAME_MEDIA 0x03
+#define FRAME_NOTIF 0x04
 
 static const uint8_t raw_hid_desc[] = {
     0x06, 0x60, 0xFF,       /* Usage Page (Vendor 0xFF60) */
@@ -188,7 +193,36 @@ static void parse_media(const uint8_t *buf, uint16_t len) {
     }
 }
 
+static struct s2mini_notif notif;
+static struct s2mini_notif notif_pending;
+
+void s2mini_notif_get(struct s2mini_notif *out) {
+    K_SPINLOCK(&lock) { *out = notif; }
+}
+
+static void parse_notif(const uint8_t *buf, uint16_t len) {
+    switch (buf[3]) {
+    case 0:
+        copy_text(notif_pending.app, &buf[4], len - 4);
+        break;
+    case 1:
+        copy_text(notif_pending.title, &buf[4], len - 4);
+        break;
+    default:
+        copy_text(notif_pending.body, &buf[4], len - 4);
+        K_SPINLOCK(&lock) {
+            notif = notif_pending;
+            notif.at = k_uptime_get();
+        }
+        break;
+    }
+}
+
 static void parse_frame(const uint8_t *buf, uint16_t len) {
+    if (len >= 5 && buf[0] == FRAME_MAGIC && buf[1] == FRAME_NOTIF) {
+        parse_notif(buf, len);
+        return;
+    }
     if (len >= 5 && buf[0] == FRAME_MAGIC && buf[1] == FRAME_MEDIA) {
         parse_media(buf, len);
         return;
