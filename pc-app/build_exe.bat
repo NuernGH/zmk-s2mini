@@ -8,7 +8,7 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt pyinstaller
 pyinstaller --noconfirm --onefile --windowed --name S2mini60 ^
   --collect-all customtkinter --collect-all winrt --collect-submodules pycaw --collect-submodules comtypes ^
-  --hidden-import pystray._win32 --hidden-import hid ^
+  --hidden-import pystray._win32 --hidden-import hid --hidden-import serial --hidden-import serial.tools.list_ports ^
   s2mini_app.py
 echo.
 echo Gotowe: %~dp0dist\S2mini60.exe

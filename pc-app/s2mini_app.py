@@ -25,6 +25,7 @@ import customtkinter as ctk
 from PIL import Image, ImageDraw
 
 import icons
+import keymap_tab
 import s2mini_oled as core
 
 APP_TITLE = "S2 mini 60"
@@ -276,7 +277,8 @@ class Window(ctk.CTk):
         ctk.CTkLabel(side, text="S2 mini 60", font=ctk.CTkFont(size=20, weight="bold")).pack(anchor="w", padx=20, pady=(22, 0))
         ctk.CTkLabel(side, text="ekran klawiatury", text_color=MUTED).pack(anchor="w", padx=20, pady=(0, 18))
         self.pages, self.nav = {}, {}
-        for key, label in (("launcher", "Szybki start"), ("screen", "Ekran"), ("status", "Stan")):
+        for key, label in (("launcher", "Szybki start"), ("keymap", "Keymapa"), ("screen", "Ekran"),
+                           ("status", "Stan")):
             b = ctk.CTkButton(side, text=label, anchor="w", height=36, corner_radius=8,
                               fg_color="transparent", hover_color=CARD_HI, command=lambda k=key: self.show(k))
             b.pack(fill="x", padx=12, pady=2)
@@ -289,6 +291,7 @@ class Window(ctk.CTk):
         body.grid_columnconfigure(0, weight=1)
         body.grid_rowconfigure(0, weight=1)
         self.pages["launcher"] = self._launcher_page(body)
+        self.pages["keymap"] = keymap_tab.KeymapPage(body, self._header)
         self.pages["screen"] = self._screen_page(body)
         self.pages["status"] = self._status_page(body)
         self.show("launcher")
