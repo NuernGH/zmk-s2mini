@@ -5,7 +5,7 @@
  * Ramka z PC (raport wyjściowy, 32 B, bez ID raportu):
  *   [0] 0x53 ('S')  [1] 0x01 (wersja)  [2] flagi S2MINI_PC_*
  *   [3] CPU %  [4] CPU °C  [5] GPU %  [6] GPU °C  [7] głośność %
- *   [8] godzina  [9] minuta  [10] sekunda   reszta = 0
+ *   [8] godzina  [9] minuta  [10] sekunda  [11] iGPU % (flaga S2MINI_PC_IGPU)   reszta = 0
  *
  * Ramka z listą portów COM (jedna ramka na port, wysyłane po kolei):
  *   [0] 0x53  [1] 0x02  [2] numer portu (od 0)  [3] liczba portów
@@ -152,6 +152,7 @@ static void parse_frame(const uint8_t *buf, uint16_t len) {
         .hour = buf[8] % 24,
         .minute = buf[9] % 60,
         .second = buf[10] % 60,
+        .igpu_load = len >= 12 ? MIN(buf[11], 100) : 0,
     };
 
     K_SPINLOCK(&lock) {

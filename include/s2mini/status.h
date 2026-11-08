@@ -20,6 +20,7 @@ int64_t s2mini_knob_mode_changed_at(void);
 #define S2MINI_PC_VOLUME BIT(2)
 #define S2MINI_PC_TIME BIT(3)
 #define S2MINI_PC_MUTED BIT(4)
+#define S2MINI_PC_IGPU BIT(5) /* zintegrowane GPU (Intel), tylko obciążenie */
 
 struct s2mini_pc_data {
     uint8_t flags;
@@ -31,6 +32,7 @@ struct s2mini_pc_data {
     uint8_t hour;
     uint8_t minute;
     uint8_t second;
+    uint8_t igpu_load; /* % */
 };
 
 /* Porty COM z PC (ramka 0x02). */

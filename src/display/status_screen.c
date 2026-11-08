@@ -76,7 +76,8 @@ static lv_obj_t *m_knob;
 struct meter {
     lv_obj_t *fill, *pct, *temp;
 };
-static struct meter m_cpu, m_gpu, m_vol;
+static struct meter m_cpu, m_gpu, m_igpu, m_vol;
+static lv_obj_t *m_igpu_row[4];
 #define METER_X 22
 #define METER_W 52
 
@@ -194,9 +195,15 @@ static void meter_set(struct meter *m, bool valid, int pct, int temp_c, const ch
 
 static void create_main(lv_obj_t *v) {
     status_bar_create(&bar_main, v);
-    meter_create(&m_cpu, v, 15, "CPU", true);
-    meter_create(&m_gpu, v, 27, "GPU", true);
-    meter_create(&m_vol, v, 39, "VOL", false);
+    /* Wiersze co 10 px: CPU, GPU (karta), IGP (Intel, gdy PC go przysyła), VOL. */
+    meter_create(&m_cpu, v, 13, "CPU", true);
+    meter_create(&m_gpu, v, 23, "GPU", true);
+    uint32_t before = lv_obj_get_child_count(v);
+    meter_create(&m_igpu, v, 33, "IGP", false);
+    for (uint32_t i = 0; i < 4 && before + i < lv_obj_get_child_count(v); i++) {
+        m_igpu_row[i] = lv_obj_get_child(v, before + i);
+    }
+    meter_create(&m_vol, v, 43, "VOL", false);
     m_knob = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_LEFT, 0, 0, "");
     m_wpm = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_RIGHT, 0, 0, "");
 }
@@ -621,6 +628,13 @@ static void update_cb(lv_timer_t *timer) {
     status_bar_update(&bar_main, clock, layer_name(), &t);
     meter_set(&m_cpu, cpu, pc.cpu_load, pc.cpu_temp, NULL);
     meter_set(&m_gpu, gpu, pc.gpu_load, pc.gpu_temp, NULL);
+    bool igpu = pc.flags & S2MINI_PC_IGPU;
+    meter_set(&m_igpu, igpu, pc.igpu_load, 0, NULL);
+    for (int i = 0; i < 4; i++) {
+        if (m_igpu_row[i] != NULL) {
+            set_hidden(m_igpu_row[i], !igpu);
+        }
+    }
     meter_set(&m_vol, vol, muted ? 0 : pc.volume, 0, muted ? "MUTE" : NULL);
     lv_label_set_text_fmt(m_knob, "knob: %s", knob);
     wpm_update(m_wpm, c.show_wpm);

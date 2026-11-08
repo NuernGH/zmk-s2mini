@@ -32,7 +32,7 @@ USAGE_PAGE = 0xFF60
 REPORT_SIZE = 32
 MAGIC, VERSION, PORTS = 0x53, 0x01, 0x02
 PORT_TEXT = 28
-F_CPU, F_GPU, F_VOLUME, F_TIME, F_MUTED = 1, 2, 4, 8, 16
+F_CPU, F_GPU, F_VOLUME, F_TIME, F_MUTED, F_IGPU = 1, 2, 4, 8, 16, 32
 
 LHM_URL = "http://localhost:8085/data.json"
 
@@ -57,10 +57,13 @@ CPU_TEMP_NAMES = ("cpu package", "core (tctl/tdie)", "package", "core (tctl)", "
 
 
 def read_lhm(url=LHM_URL):
-    """Zwraca dict cpu_load, cpu_temp, gpu_load, gpu_temp (brakujące = None) z LibreHardwareMonitor."""
+    """Zwraca dict cpu_load, cpu_temp, gpu_load, gpu_temp, igpu_load (brakujące = None) z LibreHardwareMonitor.
+
+    gpu_* = karta (NVIDIA/AMD), igpu_load = zintegrowany Intel (LHM daje mu tylko obciążenie „D3D 3D”).
+    """
     with urllib.request.urlopen(url, timeout=0.8) as r:
         tree = json.load(r)
-    out = dict(cpu_load=None, cpu_temp=None, gpu_load=None, gpu_temp=None)
+    out = dict(cpu_load=None, cpu_temp=None, gpu_load=None, gpu_temp=None, igpu_load=None)
     cpu_temp_rank = len(CPU_TEMP_NAMES)
     for node, _ in _walk(tree):
         sid = str(node.get("SensorId", "")).lower()
@@ -70,7 +73,8 @@ def read_lhm(url=LHM_URL):
         if not sid or value is None:
             continue
         is_cpu = sid.startswith(("/intelcpu", "/amdcpu", "/cpu"))
-        is_gpu = sid.startswith("/gpu")
+        is_igpu = sid.startswith("/gpu-intel")
+        is_gpu = sid.startswith("/gpu") and not is_igpu
         is_temp = stype == "temperature" or "/temperature/" in sid
         is_load = stype == "load" or "/load/" in sid
         if is_cpu and is_load and text == "cpu total":
@@ -79,6 +83,8 @@ def read_lhm(url=LHM_URL):
             rank = CPU_TEMP_NAMES.index(text)
             if rank < cpu_temp_rank:
                 out["cpu_temp"], cpu_temp_rank = value, rank
+        elif is_igpu and is_load and text in ("d3d 3d", "gpu core") and out["igpu_load"] is None:
+            out["igpu_load"] = value
         elif is_gpu and is_load and text == "gpu core" and out["gpu_load"] is None:
             out["gpu_load"] = value
         elif is_gpu and is_temp and text in ("gpu core", "gpu temperature") and out["gpu_temp"] is None:
@@ -134,7 +140,7 @@ class Volume:
 
 
 def collect(volume, warn=print):
-    data = dict(cpu_load=None, cpu_temp=None, gpu_load=None, gpu_temp=None)
+    data = dict(cpu_load=None, cpu_temp=None, gpu_load=None, gpu_temp=None, igpu_load=None)
     try:
         data.update({k: v for k, v in read_lhm().items() if v is not None})
     except Exception:
@@ -173,6 +179,9 @@ def frame(data):
         b[7] = clamp(data["volume"])
     if data["muted"]:
         flags |= F_MUTED
+    if data.get("igpu_load") is not None:
+        flags |= F_IGPU
+        b[11] = clamp(data["igpu_load"])
     t = data["time"]
     b[8], b[9], b[10] = t.tm_hour, t.tm_min, t.tm_sec
     b[2] = flags
@@ -304,6 +313,7 @@ def fmt(d):
     f = lambda v, u: "--" if v is None else f"{v:.0f}{u}"
     return (f"{time.strftime('%H:%M:%S', d['time'])}  CPU {f(d['cpu_load'], '%')} {f(d['cpu_temp'], '°C')}"
             f"  GPU {f(d['gpu_load'], '%')} {f(d['gpu_temp'], '°C')}"
+            f"  iGPU {f(d.get('igpu_load'), '%')}"
             f"  VOL {'mute' if d['muted'] else f(d['volume'], '%')}"
             + (f"  PORTS {', '.join(d['ports']) or '-'}" if "ports" in d else ""))
 
