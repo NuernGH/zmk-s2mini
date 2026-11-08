@@ -43,10 +43,51 @@ struct s2mini_pc_data {
  */
 int s2mini_ports_get(char out[][S2MINI_PORT_TEXT], int max, int64_t *age_ms, int64_t *added_at);
 
-/* Widok ekranu wybierany przez &scr_view. */
-enum s2mini_view { S2MINI_VIEW_MAIN, S2MINI_VIEW_PORTS, S2MINI_VIEW_COUNT };
+/* Widok ekranu wybierany przez &scr_view (CON / BAK). */
+enum s2mini_view {
+    S2MINI_VIEW_MAIN,
+    S2MINI_VIEW_TIMER,
+    S2MINI_VIEW_PORTS,
+    S2MINI_VIEW_SETTINGS,
+    S2MINI_VIEW_COUNT
+};
 int s2mini_screen_view(void);
 void s2mini_screen_view_step(int delta);
 
 /* Ostatnie dane z PC. Zwraca false, gdy jeszcze nic nie przyszło. age_ms = wiek danych. */
 bool s2mini_pc_data_get(struct s2mini_pc_data *out, int64_t *age_ms);
+
+/*
+ * Minutnik i ustawienia ekranu (src/ui_state.c). Na widokach TIMER i SETTINGS gałka steruje
+ * ekranem zamiast trybu (głośność itd.), a krótkie PUSH zatwierdza.
+ */
+enum s2mini_timer_state { S2MINI_TIMER_IDLE, S2MINI_TIMER_RUNNING, S2MINI_TIMER_PAUSED, S2MINI_TIMER_DONE };
+
+struct s2mini_timer {
+    enum s2mini_timer_state state;
+    int minutes;      /* ustawiony czas */
+    int remaining_ms; /* pozostało (RUNNING / PAUSED) */
+    int done_ms;      /* od ilu ms minął czas (DONE) */
+};
+
+enum s2mini_setting { S2MINI_SET_BRIGHTNESS, S2MINI_SET_INVERT, S2MINI_SET_CLOCK, S2MINI_SET_WPM, S2MINI_SET_COUNT };
+
+struct s2mini_ui_settings {
+    uint8_t brightness; /* 1..5 */
+    uint8_t invert;     /* 0/1 */
+    uint8_t clock12;    /* 0 = 24 h, 1 = 12 h */
+    uint8_t show_wpm;   /* 0/1 */
+};
+
+#define S2MINI_BRIGHTNESS_LEVELS 5
+
+void s2mini_timer_get(struct s2mini_timer *out);
+void s2mini_ui_settings_get(struct s2mini_ui_settings *out);
+/* Zaznaczona pozycja menu ustawień i czy jest w trybie zmiany wartości. */
+void s2mini_settings_menu_get(int *selected, bool *editing);
+
+/* Czy gałka / PUSH sterują teraz ekranem (widok TIMER albo SETTINGS, albo dzwoni minutnik). */
+bool s2mini_ui_knob_captured(void);
+bool s2mini_ui_push_captured(void);
+void s2mini_ui_knob(int delta);
+void s2mini_ui_push(void);

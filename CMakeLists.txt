@@ -21,6 +21,7 @@ if(TARGET app AND (CONFIG_S2MINI_KNOB_MODES OR CONFIG_S2MINI_RAW_HID OR CONFIG_S
   if(CONFIG_S2MINI_STATUS_SCREEN)
     target_sources(app PRIVATE
       src/display/status_screen.c
+      src/ui_state.c
       src/display/fonts/s2m_font_9.c
       src/display/fonts/s2m_font_11.c
       src/display/fonts/s2m_font_14.c

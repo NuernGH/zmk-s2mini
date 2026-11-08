@@ -4,7 +4,11 @@
  *  2. GAME (warstwa z etykietą game_layer aktywna): duże temperatury CPU/GPU;
  *  3. zmiana trybu gałki: na ok. 1,5 s nazwa trybu i kropki;
  *  4. brak danych z PC: tylko warstwa i tryb gałki;
- *  5. porty COM (CON/BAK przełączają widok; nowy port pokazuje się sam na 3 s).
+ *  5. porty COM (CON/BAK przełączają widok; nowy port pokazuje się sam na 3 s);
+ *  6. ściąga warstwy FN (gdy FN jest najwyższą aktywną warstwą);
+ *  7. minutnik i 8. ustawienia (gałka steruje ekranem, PUSH zatwierdza);
+ *  9. „TIME UP”, gdy minutnik dobiegnie końca.
+ * Pasek u góry: godzina, Caps / Num Lock (A, 1), pozostały czas minutnika, warstwa.
  * Stan sprawdza timer LVGL co 100 ms, więc nic nie dotyka LVGL spoza wątku ekranu.
  *
  * SPDX-License-Identifier: MIT
@@ -15,8 +19,14 @@
 #include <zephyr/kernel.h>
 #include <lvgl.h>
 
+#include <zephyr/device.h>
+#include <zephyr/drivers/display.h>
 #include <zmk/display/status_screen.h>
 #include <zmk/keymap.h>
+#include <zmk/hid_indicators.h>
+#if IS_ENABLED(CONFIG_ZMK_WPM)
+#include <zmk/wpm.h>
+#endif
 #include <s2mini/status.h>
 
 LV_FONT_DECLARE(s2m_font_9);
@@ -36,12 +46,33 @@ LV_FONT_DECLARE(s2m_font_20);
 
 static lv_color_t fg, bg;
 
-enum view { VIEW_MAIN, VIEW_GAME, VIEW_KNOB, VIEW_NO_PC, VIEW_PORTS, VIEW_COUNT };
+enum view {
+    VIEW_MAIN,
+    VIEW_GAME,
+    VIEW_KNOB,
+    VIEW_NO_PC,
+    VIEW_PORTS,
+    VIEW_FN,
+    VIEW_TIMER,
+    VIEW_SETTINGS,
+    VIEW_DONE,
+    VIEW_COUNT
+};
+
+#define FN_LAYER_NAME "FN"
+#define HID_LED_NUM BIT(0)
+#define HID_LED_CAPS BIT(1)
+
+/* Pasek u góry widoku głównego i „bez PC”. */
+struct status_bar {
+    lv_obj_t *time, *caps, *num, *timer, *layer;
+};
+static struct status_bar bar_main, bar_no_pc;
 
 static lv_obj_t *views[VIEW_COUNT];
 
 /* 1. główny */
-static lv_obj_t *m_time, *m_layer, *m_knob;
+static lv_obj_t *m_knob;
 struct meter {
     lv_obj_t *fill, *pct, *temp;
 };
@@ -57,8 +88,23 @@ static lv_obj_t *k_name;
 #define MAX_DOTS 8
 static lv_obj_t *k_dots[MAX_DOTS];
 
+static lv_obj_t *m_wpm;
+
 /* 4. bez PC */
-static lv_obj_t *n_layer, *n_knob;
+static lv_obj_t *n_knob, *n_wpm;
+
+/* 7. minutnik */
+static lv_obj_t *t_state, *t_time, *t_hint;
+
+/* 8. ustawienia */
+struct menu_row {
+    lv_obj_t *box, *name, *value;
+};
+static struct menu_row s_rows[S2MINI_SET_COUNT];
+static lv_obj_t *s_hint;
+
+/* 9. koniec minutnika */
+static lv_obj_t *d_box, *d_title, *d_hint;
 
 /* 5. porty COM */
 static lv_obj_t *p_count, *p_rows[PORT_ROWS];
@@ -89,6 +135,37 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, bool inverted, l
 
 static lv_obj_t *top_bar(lv_obj_t *parent) { return box(parent, 0, 0, W, BAR_H, true, 0); }
 
+/* Mały wskaźnik w pasku: czarne pole z jasną literą (A = Caps Lock, 1 = Num Lock). */
+static lv_obj_t *indicator(lv_obj_t *parent, int x, const char *text) {
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_pos(o, x, 1);
+    lv_obj_set_size(o, 9, 10);
+    lv_obj_set_style_bg_color(o, bg, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    label(o, &s2m_font_9, false, LV_ALIGN_CENTER, 0, 0, text);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    return o;
+}
+
+static void status_bar_create(struct status_bar *b, lv_obj_t *parent) {
+    top_bar(parent);
+    b->time = label(parent, &s2m_font_11, true, LV_ALIGN_TOP_LEFT, 2, 0, "--:--");
+    b->caps = indicator(parent, 37, "A");
+    b->num = indicator(parent, 47, "1");
+    b->timer = label(parent, &s2m_font_9, true, LV_ALIGN_TOP_LEFT, 60, 1, "");
+    b->layer = label(parent, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
+}
+
+static void set_hidden(lv_obj_t *o, bool hidden) {
+    if (hidden) {
+        lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void meter_create(struct meter *m, lv_obj_t *parent, int y, const char *name, bool temp) {
     label(parent, &s2m_font_9, false, LV_ALIGN_TOP_LEFT, 0, y, name);
     box(parent, METER_X, y + 1, METER_W, 8, false, 1);
@@ -116,13 +193,12 @@ static void meter_set(struct meter *m, bool valid, int pct, int temp_c, const ch
 }
 
 static void create_main(lv_obj_t *v) {
-    top_bar(v);
-    m_time = label(v, &s2m_font_11, true, LV_ALIGN_TOP_LEFT, 2, 0, "");
-    m_layer = label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
+    status_bar_create(&bar_main, v);
     meter_create(&m_cpu, v, 15, "CPU", true);
     meter_create(&m_gpu, v, 27, "GPU", true);
     meter_create(&m_vol, v, 39, "VOL", false);
     m_knob = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_LEFT, 0, 0, "");
+    m_wpm = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_RIGHT, 0, 0, "");
 }
 
 static void create_game(lv_obj_t *v) {
@@ -155,13 +231,57 @@ static void create_knob(lv_obj_t *v) {
 }
 
 static void create_no_pc(lv_obj_t *v) {
-    top_bar(v);
-    label(v, &s2m_font_11, true, LV_ALIGN_TOP_LEFT, 2, 0, "--:--");
-    n_layer = label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
+    status_bar_create(&bar_no_pc, v);
     label(v, &s2m_font_11, false, LV_ALIGN_TOP_MID, 0, 15, "no data from PC");
     label(v, &s2m_font_9, false, LV_ALIGN_TOP_MID, 0, 30, "start the app");
     label(v, &s2m_font_9, false, LV_ALIGN_TOP_MID, 0, 40, "on your PC");
     n_knob = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_LEFT, 0, 0, "");
+    n_wpm = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_RIGHT, 0, 0, "");
+}
+
+/* Ściąga warstwy FN (zgodna z keymapą s2mini_60.keymap). */
+static void create_fn(lv_obj_t *v) {
+    top_bar(v);
+    label(v, &s2m_font_9, true, LV_ALIGN_TOP_LEFT, 2, 1, "FN LAYER");
+    label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "\\ Studio");
+    static const char *const rows[] = {
+        "1-= F1-F12   Esc `",
+        "IJKL arrows  BS Del",
+        "U O PgUp/Dn  P PrtSc",
+        "H ; Home/End  G GAME",
+    };
+    for (int i = 0; i < ARRAY_SIZE(rows); i++) {
+        label(v, &s2m_font_9, false, LV_ALIGN_TOP_LEFT, 0, 14 + i * 12, rows[i]);
+    }
+}
+
+static void create_timer(lv_obj_t *v) {
+    top_bar(v);
+    label(v, &s2m_font_9, true, LV_ALIGN_TOP_LEFT, 2, 1, "TIMER");
+    t_state = label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
+    t_time = label(v, &s2m_font_20, false, LV_ALIGN_TOP_MID, 0, 18, "");
+    t_hint = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_MID, 0, 0, "");
+}
+
+static const char *const setting_names[S2MINI_SET_COUNT] = {"Brightness", "Invert", "Clock",
+                                                            "WPM"};
+
+static void create_settings(lv_obj_t *v) {
+    top_bar(v);
+    label(v, &s2m_font_9, true, LV_ALIGN_TOP_LEFT, 2, 1, "SETTINGS");
+    for (int i = 0; i < S2MINI_SET_COUNT; i++) {
+        struct menu_row *r = &s_rows[i];
+        r->box = box(v, 0, 12 + i * 10, W, 10, false, 0);
+        r->name = label(r->box, &s2m_font_9, false, LV_ALIGN_LEFT_MID, 2, 0, setting_names[i]);
+        r->value = label(r->box, &s2m_font_9, false, LV_ALIGN_RIGHT_MID, -2, 0, "");
+    }
+    s_hint = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_MID, 0, 0, "");
+}
+
+static void create_done(lv_obj_t *v) {
+    d_box = box(v, 0, 0, W, H, true, 0);
+    d_title = label(v, &s2m_font_20, true, LV_ALIGN_TOP_MID, 0, 12, "TIME UP");
+    d_hint = label(v, &s2m_font_9, true, LV_ALIGN_BOTTOM_MID, 0, -6, "press knob");
 }
 
 static void create_ports(lv_obj_t *v) {
@@ -236,6 +356,133 @@ static const char *knob_name(void) {
     return s2mini_knob_mode_count() > 0 ? s2mini_knob_mode_name(s2mini_knob_mode_index()) : "";
 }
 
+static void fmt_clock(char *out, size_t n, const struct s2mini_pc_data *pc, bool valid,
+                      bool clock12) {
+    if (!valid || !(pc->flags & S2MINI_PC_TIME)) {
+        snprintf(out, n, "--:--");
+        return;
+    }
+    int h = pc->hour;
+    if (clock12) {
+        h = h % 12;
+        h = h == 0 ? 12 : h;
+    }
+    snprintf(out, n, "%02d:%02d", h, pc->minute);
+}
+
+static void fmt_mmss(char *out, size_t n, int ms) {
+    int sec = (ms + 999) / 1000;
+    if (sec < 0) {
+        sec = 0;
+    }
+    snprintf(out, n, "%02d:%02d", sec / 60, sec % 60);
+}
+
+static void status_bar_update(struct status_bar *b, const char *clock, const char *layer,
+                              const struct s2mini_timer *t) {
+    lv_label_set_text(b->time, clock);
+    zmk_hid_indicators_t leds = zmk_hid_indicators_get_current_profile();
+    set_hidden(b->caps, !(leds & HID_LED_CAPS));
+    set_hidden(b->num, !(leds & HID_LED_NUM));
+    if (t->state == S2MINI_TIMER_RUNNING || t->state == S2MINI_TIMER_PAUSED) {
+        char mmss[8];
+        fmt_mmss(mmss, sizeof(mmss), t->remaining_ms);
+        lv_label_set_text(b->timer, mmss);
+    } else {
+        lv_label_set_text(b->timer, "");
+    }
+    lv_label_set_text(b->layer, layer);
+}
+
+static void wpm_update(lv_obj_t *l, bool show_wpm) {
+#if IS_ENABLED(CONFIG_ZMK_WPM)
+    if (show_wpm) {
+        lv_label_set_text_fmt(l, "%d wpm", zmk_wpm_get_state());
+        return;
+    }
+#endif
+    lv_label_set_text(l, "");
+}
+
+static void update_timer_view(const struct s2mini_timer *t) {
+    char mmss[8];
+    switch (t->state) {
+    case S2MINI_TIMER_RUNNING:
+        fmt_mmss(mmss, sizeof(mmss), t->remaining_ms);
+        lv_label_set_text(t_state, "running");
+        lv_label_set_text(t_hint, "push: pause");
+        break;
+    case S2MINI_TIMER_PAUSED:
+        fmt_mmss(mmss, sizeof(mmss), t->remaining_ms);
+        lv_label_set_text(t_state, "paused");
+        lv_label_set_text(t_hint, "push: go  turn: reset");
+        break;
+    default:
+        snprintf(mmss, sizeof(mmss), "%02d:00", t->minutes);
+        lv_label_set_text(t_state, "");
+        lv_label_set_text(t_hint, "turn: set  push: start");
+        break;
+    }
+    lv_label_set_text(t_time, mmss);
+}
+
+static void update_settings_view(const struct s2mini_ui_settings *c) {
+    int sel;
+    bool editing;
+    s2mini_settings_menu_get(&sel, &editing);
+    static char bars[S2MINI_BRIGHTNESS_LEVELS + 1];
+    for (int i = 0; i < S2MINI_BRIGHTNESS_LEVELS; i++) {
+        bars[i] = i < c->brightness ? '|' : '.';
+    }
+    bars[S2MINI_BRIGHTNESS_LEVELS] = '\0';
+    const char *values[S2MINI_SET_COUNT] = {
+        bars,
+        c->invert ? "on" : "off",
+        c->clock12 ? "12h" : "24h",
+        c->show_wpm ? "on" : "off",
+    };
+    for (int i = 0; i < S2MINI_SET_COUNT; i++) {
+        bool on = i == sel;
+        struct menu_row *r = &s_rows[i];
+        lv_obj_set_style_bg_opa(r->box, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_bg_color(r->box, fg, 0);
+        lv_obj_set_style_text_color(r->name, on ? bg : fg, 0);
+        lv_obj_set_style_text_color(r->value, on ? bg : fg, 0);
+        if (on && editing) {
+            lv_label_set_text_fmt(r->value, "< %s >", values[i]);
+        } else {
+            lv_label_set_text(r->value, values[i]);
+        }
+    }
+    lv_label_set_text(s_hint, editing ? "turn: change  push: save" : "turn: move  push: change");
+}
+
+/* Jasność i odwrócenie kolorów idą prosto do sterownika ekranu (wątek ekranu). */
+static void apply_display_settings(const struct s2mini_ui_settings *c) {
+#if DT_HAS_CHOSEN(zephyr_display)
+    static const uint8_t contrast[S2MINI_BRIGHTNESS_LEVELS] = {8, 40, 100, 170, 255};
+    static int applied_brightness = -1, applied_invert = -1;
+    const struct device *dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
+    if (!device_is_ready(dev)) {
+        return;
+    }
+    if (applied_brightness != c->brightness) {
+        display_set_contrast(dev, contrast[c->brightness - 1]);
+        applied_brightness = c->brightness;
+    }
+    if (applied_invert != c->invert) {
+        display_set_pixel_format(dev, c->invert ? PIXEL_FORMAT_MONO10 : PIXEL_FORMAT_MONO01);
+        applied_invert = c->invert;
+    }
+#endif
+}
+
+static bool fn_active(void) {
+    zmk_keymap_layer_index_t index = zmk_keymap_highest_layer_active();
+    const char *name = zmk_keymap_layer_name(zmk_keymap_layer_index_to_id(index));
+    return name != NULL && strcmp(name, FN_LAYER_NAME) == 0;
+}
+
 static void show(enum view which) {
     for (int i = 0; i < VIEW_COUNT; i++) {
         if (i == which) {
@@ -248,20 +495,36 @@ static void show(enum view which) {
 
 static void update_cb(lv_timer_t *timer) {
     char buf[32];
+    char clock[8];
     struct s2mini_pc_data pc = {0};
     int64_t age = INT64_MAX;
     bool have_pc = false;
+    struct s2mini_timer t;
+    struct s2mini_ui_settings c;
+
+    s2mini_timer_get(&t);
+    s2mini_ui_settings_get(&c);
+    apply_display_settings(&c);
 
 #if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
     have_pc = s2mini_pc_data_get(&pc, &age) && age < PC_TIMEOUT_MS;
 #endif
+    fmt_clock(clock, sizeof(clock), &pc, have_pc, c.clock12);
 
+    /* Minutnik dobiegł końca: cały ekran miga co 0,5 s, aż PUSH albo 30 s. */
+    if (t.state == S2MINI_TIMER_DONE) {
+        bool lit = (t.done_ms / 500) % 2 == 0;
+        lv_obj_set_style_bg_opa(d_box, lit ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_text_color(d_title, lit ? bg : fg, 0);
+        lv_obj_set_style_text_color(d_hint, lit ? bg : fg, 0);
+        show(VIEW_DONE);
+        return;
+    }
+
+    const char *knob = knob_name();
     int64_t changed = s2mini_knob_mode_changed_at();
     bool popup = s2mini_knob_mode_count() > 0 && changed != 0 &&
                  k_uptime_get() - changed < POPUP_MS;
-
-    snprintf(buf, sizeof(buf), "%s  USB", layer_name());
-    const char *knob = knob_name();
 
     if (popup) {
         int count = MIN(s2mini_knob_mode_count(), MAX_DOTS);
@@ -283,6 +546,24 @@ static void update_cb(lv_timer_t *timer) {
         return;
     }
 
+    if (fn_active()) {
+        show(VIEW_FN);
+        return;
+    }
+
+    switch (s2mini_screen_view()) {
+    case S2MINI_VIEW_TIMER:
+        update_timer_view(&t);
+        show(VIEW_TIMER);
+        return;
+    case S2MINI_VIEW_SETTINGS:
+        update_settings_view(&c);
+        show(VIEW_SETTINGS);
+        return;
+    default:
+        break;
+    }
+
     if (ports_wanted()) {
         update_ports();
         show(VIEW_PORTS);
@@ -290,8 +571,9 @@ static void update_cb(lv_timer_t *timer) {
     }
 
     if (!have_pc) {
-        lv_label_set_text(n_layer, game_active() ? "GAME  USB" : buf);
+        status_bar_update(&bar_no_pc, clock, layer_name(), &t);
         lv_label_set_text_fmt(n_knob, "knob: %s", knob);
+        wpm_update(n_wpm, c.show_wpm);
         show(VIEW_NO_PC);
         return;
     }
@@ -300,10 +582,6 @@ static void update_cb(lv_timer_t *timer) {
     bool gpu = pc.flags & S2MINI_PC_GPU;
     bool vol = pc.flags & S2MINI_PC_VOLUME;
     bool muted = pc.flags & S2MINI_PC_MUTED;
-    char time_txt[8] = "--:--";
-    if (pc.flags & S2MINI_PC_TIME) {
-        snprintf(time_txt, sizeof(time_txt), "%02d:%02d", pc.hour, pc.minute);
-    }
 
     if (game_active()) {
         if (cpu) {
@@ -320,7 +598,7 @@ static void update_cb(lv_timer_t *timer) {
             lv_label_set_text(g_gpu_temp, "--");
             lv_label_set_text(g_gpu_load, "");
         }
-        lv_label_set_text(g_time, time_txt);
+        lv_label_set_text(g_time, clock);
         if (muted) {
             lv_label_set_text(g_vol, "mute");
         } else if (vol) {
@@ -330,9 +608,9 @@ static void update_cb(lv_timer_t *timer) {
         }
         /* Na dole jest mało miejsca: pierwsze 3 litery nazwy trybu, małymi literami. */
         snprintf(buf, sizeof(buf), "knob:%.3s", knob);
-        for (char *c = buf; *c; c++) {
-            if (*c >= 'A' && *c <= 'Z') {
-                *c += 'a' - 'A';
+        for (char *ch = buf; *ch; ch++) {
+            if (*ch >= 'A' && *ch <= 'Z') {
+                *ch += 'a' - 'A';
             }
         }
         lv_label_set_text(g_knob, buf);
@@ -340,12 +618,12 @@ static void update_cb(lv_timer_t *timer) {
         return;
     }
 
-    lv_label_set_text(m_time, time_txt);
-    lv_label_set_text(m_layer, buf);
+    status_bar_update(&bar_main, clock, layer_name(), &t);
     meter_set(&m_cpu, cpu, pc.cpu_load, pc.cpu_temp, NULL);
     meter_set(&m_gpu, gpu, pc.gpu_load, pc.gpu_temp, NULL);
     meter_set(&m_vol, vol, muted ? 0 : pc.volume, 0, muted ? "MUTE" : NULL);
     lv_label_set_text_fmt(m_knob, "knob: %s", knob);
+    wpm_update(m_wpm, c.show_wpm);
     show(VIEW_MAIN);
 }
 
@@ -363,6 +641,10 @@ lv_obj_t *zmk_display_status_screen(void) {
     create_knob(views[VIEW_KNOB]);
     create_no_pc(views[VIEW_NO_PC]);
     create_ports(views[VIEW_PORTS]);
+    create_fn(views[VIEW_FN]);
+    create_timer(views[VIEW_TIMER]);
+    create_settings(views[VIEW_SETTINGS]);
+    create_done(views[VIEW_DONE]);
 
     update_cb(NULL);
     lv_timer_create(update_cb, 100, NULL);

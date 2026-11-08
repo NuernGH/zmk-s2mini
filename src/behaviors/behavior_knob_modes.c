@@ -8,6 +8,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/sys/util.h>
 
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
@@ -30,6 +32,7 @@ BUILD_ASSERT(ARRAY_SIZE(mode_devs) == ARRAY_SIZE(mode_names),
 
 static atomic_t current_mode;
 static atomic_t pending_mode;
+static atomic_t captured; /* ostatni obrót poszedł do ekranu */
 static int64_t changed_at;
 
 int s2mini_knob_mode_count(void) { return ARRAY_SIZE(mode_devs); }
@@ -52,6 +55,23 @@ static int knob_accept_data(struct zmk_behavior_binding *binding,
                             const struct zmk_sensor_config *sensor_config,
                             size_t channel_data_size,
                             const struct zmk_sensor_channel_data *channel_data) {
+#if IS_ENABLED(CONFIG_S2MINI_STATUS_SCREEN)
+    /* Widoki TIMER i SETTINGS: gałka steruje ekranem, nic nie idzie do komputera. */
+    if (s2mini_ui_knob_captured()) {
+        static int64_t acc; /* mikrostopnie */
+        const struct sensor_value value = channel_data[0].value;
+        int64_t step = 360000000LL / MAX(sensor_config->triggers_per_rotation, 1);
+        acc += (int64_t)value.val1 * 1000000 + value.val2;
+        int delta = (int)(acc / step);
+        acc %= step;
+        atomic_set(&captured, 1);
+        if (delta != 0) {
+            s2mini_ui_knob(delta);
+        }
+        return 0;
+    }
+    atomic_set(&captured, 0);
+#endif
     int mode = atomic_get(&current_mode);
     atomic_set(&pending_mode, mode);
     struct zmk_behavior_binding target = mode_binding(mode);
@@ -62,6 +82,9 @@ static int knob_accept_data(struct zmk_behavior_binding *binding,
 static int knob_process(struct zmk_behavior_binding *binding,
                         struct zmk_behavior_binding_event event,
                         enum behavior_sensor_binding_process_mode mode) {
+    if (atomic_get(&captured)) {
+        return ZMK_BEHAVIOR_OPAQUE;
+    }
     struct zmk_behavior_binding target = mode_binding(atomic_get(&pending_mode));
     return behavior_sensor_keymap_binding_process(&target, event, mode);
 }
@@ -80,6 +103,13 @@ BEHAVIOR_DT_DEFINE(KNOB_NODE, NULL, NULL, NULL, NULL, POST_KERNEL,
 
 static int knob_next_pressed(struct zmk_behavior_binding *binding,
                              struct zmk_behavior_binding_event event) {
+#if IS_ENABLED(CONFIG_S2MINI_STATUS_SCREEN)
+    /* Na widokach minutnika i ustawień (albo gdy dzwoni minutnik) PUSH zatwierdza. */
+    if (s2mini_ui_push_captured()) {
+        s2mini_ui_push();
+        return ZMK_BEHAVIOR_OPAQUE;
+    }
+#endif
     int next = (atomic_get(&current_mode) + 1) % ARRAY_SIZE(mode_devs);
     atomic_set(&current_mode, next);
     changed_at = k_uptime_get();
