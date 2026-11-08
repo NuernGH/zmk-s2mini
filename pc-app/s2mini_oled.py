@@ -368,6 +368,101 @@ class Media:
             return None
 
 
+def media_child():
+    """Tryb `--media-child`: osobny proces z COM jak w wątku głównym; co 1 s jedna linia JSON.
+
+    winrt (GSMTC) w wątku pobocznym programu zwracał pusto albo się zawieszał, a w osobnym procesie
+    działa jak w pierwszej wersji skryptu. Kończy się, gdy program główny zamknie stdin.
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+            ctypes.windll.ole32.CoInitializeEx(None, 2)  # COINIT_APARTMENTTHREADED, jak comtypes
+        except Exception:
+            pass
+    threading.Thread(target=lambda: (sys.stdin.read(), os._exit(0)), daemon=True).start()
+    media = Media()
+    while True:
+        try:
+            m = media.read()
+        except Exception:
+            m = None
+        try:
+            sys.stdout.write(json.dumps(m) + "\n")
+            sys.stdout.flush()
+        except Exception:
+            os._exit(0)
+        if not media.ok:
+            os._exit(0)  # brak winrt: nie ma po co działać
+        time.sleep(1.0)
+
+
+class MediaProcess:
+    """Uruchamia `--media-child` i trzyma ostatni wynik; zawieszony proces jest zabijany i startuje od nowa."""
+
+    STALE_S = 10.0
+
+    def __init__(self, max_age=5.0):
+        self.max_age = max_age
+        self.value, self.at = None, 0.0
+        self.proc, self.started = None, 0.0
+        self.disabled = False
+        threading.Thread(target=self._watch, daemon=True).start()
+
+    def _cmd(self):
+        if getattr(sys, "frozen", False):
+            return [sys.executable, "--media-child"]
+        return [sys.executable, os.path.abspath(__file__), "--media-child"]
+
+    def _start(self):
+        flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+        self.proc = subprocess.Popen(self._cmd(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     stderr=subprocess.DEVNULL, creationflags=flags)
+        self.started = time.monotonic()
+        threading.Thread(target=self._reader, args=(self.proc,), daemon=True).start()
+
+    def _reader(self, proc):
+        for line in proc.stdout:
+            try:
+                v = json.loads(line)
+            except Exception:
+                continue
+            self.value = tuple(v) if v else None
+            self.at = time.monotonic()
+
+    def _watch(self):
+        fails = 0
+        while not self.disabled:
+            p = self.proc
+            now = time.monotonic()
+            if p is None or p.poll() is not None:
+                if p is not None and now - self.started < 5:
+                    fails += 1
+                    if fails >= 3:  # kończy się od razu (np. brak winrt) — dajemy spokój
+                        self.disabled = True
+                        return
+                try:
+                    self._start()
+                except Exception:
+                    self.disabled = True
+                    return
+            elif now - max(self.at, self.started) > self.STALE_S:
+                p.kill()
+            else:
+                fails = 0
+            time.sleep(1.0)
+
+    def read(self):
+        if time.monotonic() - self.at > self.max_age:
+            return None
+        return self.value
+
+    def stop(self):
+        self.disabled = True
+        if self.proc and self.proc.poll() is None:
+            self.proc.kill()
+
+
 def media_frames(state, title, artist):
     """Ramki 0x03: tytuł, potem wykonawca (ASCII, do 28 znaków)."""
     frames = []
@@ -663,7 +758,7 @@ class Sender(threading.Thread):
     def run(self):
         volume = Volume()
         net = NetRate()
-        media = Background(Media().read, every=1.0)
+        media = MediaProcess()
         notes = Notifications()
         new_notes = []
         notes_bg = Background(lambda: new_notes.extend(notes.read()) if self.config["data"].get("notifications") else None,
@@ -761,6 +856,9 @@ def run_tray(sender):
 
 
 def main():
+    if "--media-child" in sys.argv:
+        media_child()
+        return
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--console", action="store_true", help="bez ikony w zasobniku, wypisuje dane")
     ap.add_argument("--dry-run", action="store_true", help="tylko odczyt danych, bez klawiatury")

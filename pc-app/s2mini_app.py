@@ -450,6 +450,9 @@ def _png_bytes(img):
 
 
 def main():
+    if "--media-child" in sys.argv:  # proces pomocniczy „co gra” (ten sam exe)
+        core.media_child()
+        return
     hidden = "--hidden" in sys.argv
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
