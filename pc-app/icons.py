@@ -16,9 +16,13 @@ import os
 from PIL import Image, ImageFilter, ImageOps
 
 SIZE = 32
-STYLES = ("auto", "silhouette", "detail", "outline")
+STYLES = ("auto", "regions", "levels", "gray", "lines", "silhouette", "detail", "outline")
 STYLE_NAMES = {
     "auto": "Auto",
+    "regions": "Plamy kolorów",
+    "levels": "Jasne/ciemne",
+    "gray": "Odcienie",
+    "lines": "Rysunek",
     "silhouette": "Sylwetka",
     "detail": "Szczegóły",
     "outline": "Kontur",
@@ -162,7 +166,19 @@ def to_keyboard(img, style="auto", invert=False):
     elif style == "detail":
         mixed = Image.composite(lum, Image.new("L", (SIZE, SIZE), 0), alpha)
         out = mixed.convert("1", dither=Image.Dither.FLOYDSTEINBERG).convert("L")
-    else:  # auto: sylwetka, w środku ciemne detale wycięte, gdy jest ich rozsądnie dużo
+    elif style in ("regions", "lines"):
+        out = _regions(img, shape, lines_only=(style == "lines"))
+    elif style == "levels":
+        out = _levels(lum, shape)
+    elif style == "gray":
+        out = _gray(lum, alpha, shape)
+    elif style == "auto":
+        # jasne/ciemne, chyba że ikona jest prawie jednolita (wtedy plamy kolorów pokażą podział)
+        lev = _levels(lum, shape)
+        filled = sum(1 for v in shape.getdata() if v) or 1
+        lit = sum(1 for v in lev.getdata() if v)
+        out = lev if 0.2 < lit / filled < 0.9 else _regions(img, shape)
+    else:  # dawne auto
         dark = lum.point(lambda v: 255 if v < 70 else 0)
         holes = Image.composite(dark, Image.new("L", (SIZE, SIZE), 0), shape)
         inner = shape.filter(ImageFilter.MinFilter(3))
@@ -177,6 +193,100 @@ def to_keyboard(img, style="auto", invert=False):
     if invert:
         out = ImageOps.invert(out)
     return out.convert("1")
+
+
+def _ring(shape):
+    """Obrys kształtu (1 px po wewnętrznej stronie)."""
+    inner = shape.filter(ImageFilter.MinFilter(3))
+    return ImageChops_sub(shape, inner)
+
+
+def ImageChops_sub(a, b):
+    from PIL import ImageChops
+    return ImageChops.subtract(a, b)
+
+
+def _otsu(values):
+    hist = [0] * 256
+    for v in values:
+        hist[v] += 1
+    total = sum(hist)
+    if total == 0:
+        return 128
+    sum_all = sum(i * h for i, h in enumerate(hist))
+    best, best_t, w0, s0 = -1, 128, 0, 0
+    for t in range(256):
+        w0 += hist[t]
+        if w0 == 0 or w0 == total:
+            continue
+        s0 += t * hist[t]
+        m0, m1 = s0 / w0, (sum_all - s0) / (total - w0)
+        var = w0 * (total - w0) * (m0 - m1) ** 2
+        if var > best:
+            best, best_t = var, t
+    return best_t
+
+
+def _levels(lum, shape):
+    """Jasne części świecą, ciemne nie (próg Otsu liczony tylko w ikonie), plus obrys kształtu."""
+    from PIL import ImageChops
+    vals = [l for l, a in zip(lum.getdata(), shape.getdata()) if a]
+    t = _otsu(vals)
+    bright = lum.point(lambda v: 255 if v > t else 0)
+    out = ImageChops.multiply(bright, shape)
+    return ImageChops.lighter(out, _ring(shape))
+
+
+def _gray(lum, alpha, shape):
+    """Odcienie szarości wzorem (dithering Bayera 4×4), jasność rozciągnięta, plus obrys."""
+    from PIL import ImageChops
+    bayer = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
+    vals = [l for l, a in zip(lum.getdata(), shape.getdata()) if a]
+    lo, hi = (min(vals), max(vals)) if vals else (0, 255)
+    span = max(hi - lo, 1)
+    src, sh = lum.load(), shape.load()
+    out = Image.new("L", lum.size, 0)
+    po = out.load()
+    for y in range(SIZE):
+        for x in range(SIZE):
+            if not sh[x, y]:
+                continue
+            v = (src[x, y] - lo) / span  # 0..1
+            v = 0.15 + 0.85 * v          # ciemne też lekko świecą, żeby kształt był widoczny
+            po[x, y] = 255 if v * 16 > bayer[y % 4][x % 4] + 0.5 else 0
+    return ImageChops.lighter(out, _ring(shape))
+
+
+def _regions(img, shape, lines_only=False):
+    """Plamy kolorów: plamy świecą, a tam, gdzie kolor wyraźnie się zmienia, jest ciemna kreska.
+    lines_only: odwrotnie, świecą tylko te kreski i obrys (rysunek kreską)."""
+    from PIL import ImageChops
+    rgb = Image.new("RGB", img.size, (0, 0, 0))
+    rgb.paste(img.convert("RGB"), mask=shape)
+    rgb = rgb.filter(ImageFilter.MedianFilter(3))
+    px, sh = rgb.load(), shape.load()
+    out = Image.new("L", img.size, 0)
+    po = out.load()
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) * 0.3 + abs(a[1] - b[1]) * 0.59 + abs(a[2] - b[2]) * 0.11 + \
+            (abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])) * 0.25
+
+    for y in range(SIZE):
+        for x in range(SIZE):
+            if not sh[x, y]:
+                continue
+            c = px[x, y]
+            edge = False
+            # kreska tylko po jednej stronie granicy (prawy/dolny sąsiad), żeby była cienka
+            for dx, dy in ((1, 0), (0, 1)):
+                nx, ny = x + dx, y + dy
+                if nx < SIZE and ny < SIZE and sh[nx, ny] and dist(c, px[nx, ny]) > 70:
+                    edge = True
+            po[x, y] = 255 if edge == lines_only else 0
+    if lines_only:
+        out = ImageChops.lighter(out, _ring(shape))
+    return out
 
 
 def placeholder():
