@@ -544,6 +544,85 @@ def open_keyboard():
     return None
 
 
+class HidLink:
+    """Połączenie z kanałem Raw HID: osobny wątek zapisu i osobny wątek odczytu, każdy z własnym
+    uchwytem. Gdy wywołanie hidapi utknie (bywa na Windows mimo limitu czasu), główna pętla tego
+    nie odczuwa: stuck() zgłasza zastój, a Sender otwiera nowe połączenie (stare wątki zostają
+    porzucone)."""
+
+    STUCK_S = 4.0
+
+    def __init__(self, on_launch, log):
+        import queue
+        self.queue = queue.Queue(maxsize=400)
+        self.on_launch, self.log = on_launch, log
+        self.dead = threading.Event()
+        self.busy_since = None  # czas początku bieżącego zapisu
+        self.wdev = open_keyboard()
+        if self.wdev is None:
+            raise OSError("keyboard not found")
+        self.rdev = open_keyboard()
+        threading.Thread(target=self._writer, daemon=True).start()
+        if self.rdev is not None:
+            threading.Thread(target=self._reader, daemon=True).start()
+
+    def send(self, payloads):
+        for p in payloads:
+            try:
+                self.queue.put_nowait(p)
+            except Exception:
+                break  # kolejka pełna: zapis stoi, stuck() to zgłosi
+
+    def stuck(self):
+        b = self.busy_since
+        return self.dead.is_set() or (b is not None and time.monotonic() - b > self.STUCK_S)
+
+    def _writer(self):
+        while not self.dead.is_set():
+            payload = self.queue.get()
+            if payload is None:
+                return
+            self.busy_since = time.monotonic()
+            try:
+                # Windows/hidapi: pierwszy bajt to numer raportu (0 = bez numeru).
+                if self.wdev.write(b"\x00" + payload) < 0:
+                    raise OSError("write failed")
+            except Exception as e:
+                self.log(f"write: {e}")
+                self.dead.set()
+                return
+            self.busy_since = None
+
+    def _reader(self):
+        while not self.dead.is_set():
+            try:
+                data = self.rdev.read(64, 500)
+            except Exception as e:
+                self.log(f"read: {e}")
+                return  # bez odczytu nie ma szybkiego startu, ale wysyłanie działa dalej
+            if data and len(data) >= 3 and data[0] == MAGIC and data[1] == LAUNCH:
+                try:
+                    self.on_launch(data[2])
+                except Exception as e:
+                    self.log(f"launch: {e}")
+
+    def close(self):
+        """Zamyka bez czekania (zamknięcie uchwytu w osobnym wątku, bo też potrafi utknąć)."""
+        self.dead.set()
+        try:
+            self.queue.put_nowait(None)
+        except Exception:
+            pass
+
+        def _close():
+            for d in (self.wdev, self.rdev):
+                try:
+                    d and d.close()
+                except Exception:
+                    pass
+        threading.Thread(target=_close, daemon=True).start()
+
+
 class Sender(threading.Thread):
     def __init__(self, console=False, dry_run=False, notifications=None, config=None):
         super().__init__(daemon=True)
@@ -566,22 +645,11 @@ class Sender(threading.Thread):
         self.config = copy.deepcopy(cfg)
         self.config_version += 1
 
-    def _poll_launch(self, dev, seconds):
-        """Czeka do `seconds`, czytając raporty z klawiatury (prośby o uruchomienie)."""
-        end = time.monotonic() + seconds
-        while not self.stop_event.is_set():
-            left = end - time.monotonic()
-            if left <= 0:
-                return
-            if dev is None:
-                self.stop_event.wait(left)
-                return
-            data = dev.read(64, int(min(left, 0.1) * 1000))
-            if data and len(data) >= 3 and data[0] == MAGIC and data[1] == LAUNCH:
-                apps = self.config.get("apps", [])
-                if data[2] < len(apps):
-                    self.launches += 1
-                    launch_app(apps[data[2]], self.log)
+    def _launch(self, index):
+        apps = self.config.get("apps", [])
+        if index < len(apps):
+            self.launches += 1
+            launch_app(apps[index], self.log)
 
     def run(self):
         volume = Volume()
@@ -593,7 +661,7 @@ class Sender(threading.Thread):
                               every=2.0)
         icon_cache = {}
         sent_version = -1
-        dev = None
+        link = None
         try:
             import psutil
             psutil.cpu_percent(interval=None)  # pierwszy odczyt zawsze 0
@@ -630,38 +698,25 @@ class Sender(threading.Thread):
             if self.dry_run:
                 self.log(fmt(data))
             else:
-                try:
-                    if dev is None:
-                        dev = open_keyboard()
-                        self.status = "connected" if dev else "keyboard not found"
-                        self.log(self.status)
-                        if dev is not None:
-                            payloads += app_frames(self.config.get("apps", []), icon_cache)
-                    if dev is not None:
-                        # Windows/hidapi: pierwszy bajt to numer raportu (0 = bez numeru).
-                        for payload in payloads:
-                            if dev.write(b"\x00" + payload) < 0:
-                                raise OSError("write failed")
-                        self.last_line = fmt(data)
-                        self.log(self.last_line)
-                except Exception as e:
-                    self.status = f"error: {e}"
-                    self.log(self.status)
+                if link is not None and link.stuck():
+                    self.log("hid: link stuck or lost, reconnecting")
+                    link.close()
+                    link = None
+                if link is None:
                     try:
-                        dev and dev.close()
+                        link = HidLink(self._launch, self.log)
+                        self.status = "connected"
+                        payloads += app_frames(self.config.get("apps", []), icon_cache)
                     except Exception:
-                        pass
-                    dev = None
-            try:
-                self._poll_launch(dev, 1.0)
-            except Exception as e:
-                self.log(f"read: {e}")
-                try:
-                    dev and dev.close()
-                except Exception:
-                    pass
-                dev = None
-
+                        self.status = "keyboard not found"
+                    self.log(self.status)
+                if link is not None:
+                    link.send(payloads)
+                    self.last_line = fmt(data)
+                    self.log(self.last_line)
+            self.stop_event.wait(1.0)
+        if link is not None:
+            link.close()
 
 def fmt(d):
     f = lambda v, u: "--" if v is None else f"{v:.0f}{u}"
