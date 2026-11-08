@@ -160,8 +160,10 @@ RC(5,0) RC(5,1) RC(5,2)
 
     encoder: encoder {
         compatible = "alps,ec11";
-        a-gpios = <&gpio1 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;  /* TRA = IO35 */
-        b-gpios = <&gpio1 1 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;  /* TRB = IO33 */
+        /* A i B zamienione: u Marcina moduł OLED+EC11 jest obrócony o 180° (enkoder po lewej
+         * na wyspie, ekran po prawej) i bez zamiany pokrętło działało odwrotnie. */
+        a-gpios = <&gpio1 1 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;  /* TRB = IO33 */
+        b-gpios = <&gpio1 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;  /* TRA = IO35 */
         steps = <80>;
         status = "okay";
     };
@@ -219,8 +221,7 @@ RC(5,0) RC(5,1) RC(5,2)
         page-offset = <0>;
         display-offset = <0>;
         multiplex-ratio = <63>;
-        segment-remap;
-        com-invdir;
+        /* Moduł zamontowany do góry nogami: bez segment-remap i com-invdir obraz jest obrócony o 180°. */
         prechargep = <0x22>;
     };
 };
