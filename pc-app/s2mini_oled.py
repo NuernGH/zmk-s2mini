@@ -432,10 +432,13 @@ class MediaProcess:
 
     def _watch(self):
         fails = 0
+        backoff, next_try = 0.0, 0.0
         while not self.disabled:
             p = self.proc
             now = time.monotonic()
-            if p is None or p.poll() is not None:
+            if (p is None or p.poll() is not None) and now < next_try:
+                pass  # po zawieszeniu Windows czekamy coraz dłużej (do 60 s), żeby nie mnożyć procesów
+            elif p is None or p.poll() is not None:
                 if p is not None and now - self.started < 5:
                     fails += 1
                     if fails >= 3:  # kończy się od razu (np. brak winrt) — dajemy spokój
@@ -448,8 +451,12 @@ class MediaProcess:
                     return
             elif now - max(self.at, self.started) > self.STALE_S:
                 p.kill()
+                backoff = min(60.0, backoff * 2 or 5.0)
+                next_try = now + backoff
             else:
                 fails = 0
+                if self.at > self.started:
+                    backoff = 0.0
             time.sleep(1.0)
 
     def read(self):
