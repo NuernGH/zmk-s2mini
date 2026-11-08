@@ -29,8 +29,47 @@ STYLE_NAMES = {
 }
 
 
+def _resolve_shortcut(path):
+    """Skrót .lnk → (plik z ikoną, indeks). Bez tego Windows dokleja strzałkę skrótu, a skróty
+    typu Discord/VS Code (Update.exe z parametrami) dają pustą ikonę pliku."""
+    try:
+        import comtypes.client
+        shell = comtypes.client.CreateObject("WScript.Shell", dynamic=True)
+        sc = shell.CreateShortcut(path)
+        icon_loc = str(sc.IconLocation or "")
+        target = os.path.expandvars(str(sc.TargetPath or ""))
+    except Exception:
+        return None, 0
+    file, _, idx = icon_loc.rpartition(",")
+    file = os.path.expandvars(file.strip().strip('"'))
+    try:
+        idx = int(idx)
+    except ValueError:
+        file, idx = icon_loc, 0
+    if file and os.path.exists(file):
+        return file, idx
+    if target and os.path.exists(target):
+        return target, 0
+    return None, 0
+
+
+def _hicon_from_file(file, index, size):
+    """HICON w dokładnym rozmiarze z pliku .exe/.dll/.ico (PrivateExtractIconsW)."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    user32.PrivateExtractIconsW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                            ctypes.POINTER(wintypes.HANDLE), ctypes.POINTER(wintypes.UINT),
+                                            wintypes.UINT, wintypes.UINT]
+    hicon = wintypes.HANDLE()
+    icon_id = wintypes.UINT()
+    n = user32.PrivateExtractIconsW(file, index, size, size, ctypes.byref(hicon), ctypes.byref(icon_id), 1, 0)
+    return hicon.value if n and n != 0xFFFFFFFF and hicon.value else None
+
+
 def _draw_icon_windows(path, size):
-    """Ikona przez SHGetFileInfo + DrawIconEx, rysowana na czarnym i białym tle (→ alfa)."""
+    """Ikona przez PrivateExtractIcons/SHGetFileInfo + DrawIconEx, rysowana na czarnym i białym
+    tle (→ alfa). Skróty .lnk rozwijane do pliku z ikoną (bez strzałki skrótu)."""
     import ctypes
     from ctypes import wintypes
 
@@ -70,11 +109,23 @@ def _draw_icon_windows(path, size):
     gdi32.DeleteDC.argtypes = [wintypes.HDC]
 
     SHGFI_ICON, SHGFI_LARGEICON, DI_NORMAL = 0x100, 0x0, 0x3
-    info = SHFILEINFOW()
-    if not shell32.SHGetFileInfoW(path, 0, ctypes.byref(info), ctypes.sizeof(info),
-                                  SHGFI_ICON | SHGFI_LARGEICON) or not info.hIcon:
-        return None
-    hicon = info.hIcon
+    hicon = None
+    if path.lower().endswith(".lnk"):
+        file, index = _resolve_shortcut(path)
+        if file:
+            if file.lower().endswith(".ico"):
+                return None  # .ico czyta extract_icon przez PIL (patrz niżej)
+            hicon = _hicon_from_file(file, index, size)
+            if hicon is None:
+                path = file  # SHGetFileInfo na pliku docelowym, już bez strzałki
+    elif path.lower().endswith((".exe", ".dll")):
+        hicon = _hicon_from_file(path, 0, size)
+    if hicon is None:
+        info = SHFILEINFOW()
+        if not shell32.SHGetFileInfoW(path, 0, ctypes.byref(info), ctypes.sizeof(info),
+                                      SHGFI_ICON | SHGFI_LARGEICON) or not info.hIcon:
+            return None
+        hicon = info.hIcon
 
     def render(fill):
         bmi = BITMAPINFOHEADER()
@@ -132,6 +183,13 @@ def extract_icon(path, size=64):
             return None
     if os.name != "nt":
         return None
+    if ext == ".lnk":
+        try:
+            file, _ = _resolve_shortcut(path)
+            if file and file.lower().endswith(".ico"):
+                return extract_icon(file, size)
+        except Exception:
+            pass
     try:
         return _draw_icon_windows(path, size)
     except Exception:
