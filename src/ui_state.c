@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <string.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
 
@@ -27,6 +28,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define DONE_SHOW_MS 30000
 
 static struct k_spinlock lock;
+static atomic_t ui_seq; /* bumped on every knob turn / PUSH handled here: the screen redraws at once */
+
+uint32_t s2mini_ui_seq(void) { return (uint32_t)atomic_get(&ui_seq); }
 
 static struct s2mini_ui_settings cfg = {
     .brightness = 3,
@@ -153,6 +157,7 @@ static void settings_store(void) {
 }
 
 void s2mini_ui_knob(int delta) {
+    atomic_inc(&ui_seq);
     int view = s2mini_screen_view();
     int64_t now = k_uptime_get();
     k_spinlock_key_t key = k_spin_lock(&lock);
@@ -194,6 +199,7 @@ void s2mini_ui_knob(int delta) {
 }
 
 void s2mini_ui_push(void) {
+    atomic_inc(&ui_seq);
     int view = s2mini_screen_view();
     int64_t now = k_uptime_get();
     bool store = false;

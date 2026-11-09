@@ -632,27 +632,37 @@ static void update_timer_view(const struct s2mini_timer *t) {
     switch (t->state) {
     case S2MINI_TIMER_RUNNING:
         fmt_mmss(mmss, sizeof(mmss), t->remaining_ms);
-        lv_label_set_text(t_state, "running");
-        lv_label_set_text(t_hint, "push: pause");
+        set_text_if_changed(t_state, "running");
+        set_text_if_changed(t_hint, "push: pause");
         break;
     case S2MINI_TIMER_PAUSED:
         fmt_mmss(mmss, sizeof(mmss), t->remaining_ms);
-        lv_label_set_text(t_state, "paused");
-        lv_label_set_text(t_hint, "push: go  turn: reset");
+        set_text_if_changed(t_state, "paused");
+        set_text_if_changed(t_hint, "push: go  turn: reset");
         break;
     default:
         fmt_mmss(mmss, sizeof(mmss), t->seconds * 1000);
-        lv_label_set_text(t_state, "");
-        lv_label_set_text(t_hint, "turn: set  push: start");
+        set_text_if_changed(t_state, "");
+        set_text_if_changed(t_hint, "turn: set  push: start");
         break;
     }
-    lv_label_set_text(t_time, mmss);
+    set_text_if_changed(t_time, mmss);
 }
 
 static void update_settings_view(const struct s2mini_ui_settings *c) {
     int sel;
     bool editing;
     s2mini_settings_menu_get(&sel, &editing);
+    /* Redraw only on a change: setting the same styles every 100 ms made LVGL resend the whole
+     * screen over I2C all the time, so a knob step showed up late (and looked like a jump). */
+    static int shown_sel = -1, shown_editing = -1;
+    static struct s2mini_ui_settings shown;
+    if (sel == shown_sel && editing == shown_editing && memcmp(c, &shown, sizeof(shown)) == 0) {
+        return;
+    }
+    shown_sel = sel;
+    shown_editing = editing;
+    shown = *c;
     static char bars[S2MINI_BRIGHTNESS_LEVELS + 1];
     for (int i = 0; i < S2MINI_BRIGHTNESS_LEVELS; i++) {
         bars[i] = i < c->brightness ? '|' : '.';
@@ -677,7 +687,7 @@ static void update_settings_view(const struct s2mini_ui_settings *c) {
             lv_label_set_text(r->value, values[i]);
         }
     }
-    lv_label_set_text(s_hint, editing ? "turn: change  push: save" : "turn: move  push: change");
+    set_text_if_changed(s_hint, editing ? "turn: change  push: save" : "turn: move  push: change");
 }
 
 /* Brightness and colour inversion go straight to the display driver (display thread). */
@@ -713,6 +723,19 @@ static void show(enum view which) {
         } else {
             lv_obj_add_flag(views[i], LV_OBJ_FLAG_HIDDEN);
         }
+    }
+}
+
+static void update_cb(lv_timer_t *timer);
+static lv_timer_t *update_timer;
+
+/* Knob turn / PUSH on the timer, settings or launcher: redraw now instead of within 100 ms. */
+static void knob_watch_cb(lv_timer_t *timer) {
+    static uint32_t seen;
+    uint32_t seq = s2mini_ui_seq();
+    if (seq != seen && update_timer != NULL) {
+        seen = seq;
+        lv_timer_ready(update_timer);
     }
 }
 
@@ -898,6 +921,7 @@ lv_obj_t *zmk_display_status_screen(void) {
     create_launcher(views[VIEW_LAUNCHER]);
 
     update_cb(NULL);
-    lv_timer_create(update_cb, 100, NULL);
+    update_timer = lv_timer_create(update_cb, 100, NULL);
+    lv_timer_create(knob_watch_cb, 10, NULL);
     return screen;
 }

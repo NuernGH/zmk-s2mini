@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+description: |
+  EC11 rotary encoder read by polling (every 1 ms) instead of GPIO interrupts.
+  A step is counted only after a whole detent (click), so contact bounce cannot lose or add steps.
+  Reports rotation like alps,ec11 (degrees from "steps"), so zmk,keymap-sensors works unchanged.
+
+compatible: "s2mini,ec11-poll"
+
+properties:
+  a-gpios:
+    type: phandle-array
+    required: true
+  b-gpios:
+    type: phandle-array
+    required: true
+  steps:
+    type: int
+    required: true
+    description: Pulses (A/B state changes) per full rotation, e.g. 80 for a 20-click EC11.
+  pulses-per-detent:
+    type: int
+    default: 4
+    description: A/B state changes between two clicks (4 for a 20-click / 20-pulse EC11).
+  poll-period-us:
+    type: int
+    default: 1000
+    description: How often A/B are read.

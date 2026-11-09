@@ -6,6 +6,13 @@ config S2MINI_KNOB_MODES
     default y
     depends on DT_HAS_ZMK_BEHAVIOR_KNOB_MODES_ENABLED
 
+config S2MINI_EC11_POLL
+    bool "EC11 encoder read by polling (s2mini,ec11-poll)"
+    default y
+    depends on DT_HAS_S2MINI_EC11_POLL_ENABLED
+    select SENSOR
+    select GPIO
+
 config S2MINI_RAW_HID
     bool "Raw HID: data from the PC for the screen"
     depends on ZMK_USB_NEXT && USBD_HID_SUPPORT

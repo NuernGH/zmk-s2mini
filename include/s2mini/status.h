@@ -136,3 +136,5 @@ bool s2mini_ui_knob_captured(void);
 bool s2mini_ui_push_captured(void);
 void s2mini_ui_knob(int delta);
 void s2mini_ui_push(void);
+/* Changes on every knob turn / PUSH on these views; the screen polls it to redraw without waiting. */
+uint32_t s2mini_ui_seq(void);

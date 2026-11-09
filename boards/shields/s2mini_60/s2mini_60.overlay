@@ -159,12 +159,15 @@ RC(5,0) RC(5,1) RC(5,2)
     };
 
     encoder: encoder {
-        compatible = "alps,ec11";
+        /* Read every 1 ms (src/drivers/ec11_poll.c), not by interrupts: ZMK's alps,ec11 lost
+         * clicks when the knob was turned slowly (contact bounce while its interrupts were off). */
+        compatible = "s2mini,ec11-poll";
         /* A and B swapped: Marcin's OLED+EC11 module is rotated 180° (encoder on the left
          * of the island, screen on the right) and without the swap the knob turned the wrong way. */
         a-gpios = <&gpio1 1 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;  /* TRB = IO33 */
         b-gpios = <&gpio1 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;  /* TRA = IO35 */
         steps = <80>;
+        pulses-per-detent = <4>;
         status = "okay";
     };
 
