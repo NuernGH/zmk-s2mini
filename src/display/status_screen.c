@@ -24,6 +24,8 @@
 #include <zmk/display/status_screen.h>
 #include <zmk/keymap.h>
 #include <zmk/hid_indicators.h>
+#include <zmk/activity.h>
+#include <zmk/display.h>
 #include <s2mini/status.h>
 
 LV_FONT_DECLARE(s2m_font_9);
@@ -58,6 +60,7 @@ enum view {
     VIEW_MEDIA,
     VIEW_NOTIF,
     VIEW_LAUNCHER,
+    VIEW_BOOT,
     VIEW_COUNT
 };
 
@@ -288,7 +291,7 @@ static void create_timer(lv_obj_t *v) {
 }
 
 static const char *const setting_names[S2MINI_SET_COUNT] = {"Brightness", "Invert", "Clock",
-                                                            "WPM"};
+                                                            "WPM", "Update FW"};
 
 static void create_settings(lv_obj_t *v) {
     top_bar(v);
@@ -299,7 +302,16 @@ static void create_settings(lv_obj_t *v) {
         r->name = label(r->box, &s2m_font_9, false, LV_ALIGN_LEFT_MID, 2, 0, setting_names[i]);
         r->value = label(r->box, &s2m_font_9, false, LV_ALIGN_RIGHT_MID, -2, 0, "");
     }
-    s_hint = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_MID, 0, 0, "");
+    /* Five rows fill the screen, so the hint sits in the top bar. */
+    s_hint = label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
+}
+
+/* Bootloader: the OLED keeps its picture through the restart, so say what the keyboard is doing. */
+static void create_boot(lv_obj_t *v) {
+    box(v, 0, 0, W, H, true, 0);
+    label(v, &s2m_font_20, true, LV_ALIGN_TOP_MID, 0, 8, "BOOT");
+    label(v, &s2m_font_9, true, LV_ALIGN_BOTTOM_MID, 0, -14, "firmware update mode");
+    label(v, &s2m_font_9, true, LV_ALIGN_BOTTOM_MID, 0, -3, "replug USB to cancel");
 }
 
 static void create_done(lv_obj_t *v) {
@@ -441,6 +453,64 @@ static bool notif_popup(void) {
     }
 #endif
     return false;
+}
+
+/*
+ * Notification while the screen is blanked (no keys / knob for the idle time): ZMK blanks the
+ * display and stops LVGL; data from the PC is not "activity", so the popup was never seen.
+ * Wake the screen for the popup and blank it again afterwards if the keyboard is still idle.
+ * Uses ZMK's own display callbacks (app/src/display/main.c), on the display work queue.
+ */
+static bool game_active(void);
+
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE)
+void unblank_display_cb(struct k_work *work);
+void blank_display_cb(struct k_work *work);
+
+static bool woke_for_notif;
+
+static void notif_wake_cb(struct k_work *work) {
+    if (zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE && !game_active()) {
+        woke_for_notif = true;
+        unblank_display_cb(work);
+    }
+}
+
+static void notif_sleep_cb(struct k_work *work) {
+    if (woke_for_notif && zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE) {
+        blank_display_cb(work);
+    }
+    woke_for_notif = false;
+}
+
+static K_WORK_DEFINE(notif_wake_work, notif_wake_cb);
+static K_WORK_DELAYABLE_DEFINE(notif_sleep_work, notif_sleep_cb);
+#endif
+
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE)
+static void boot_wake_cb(struct k_work *work) { unblank_display_cb(work); }
+static K_WORK_DEFINE(boot_wake_work, boot_wake_cb);
+#endif
+
+void s2mini_screen_boot_wake(void) {
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE)
+    k_work_cancel_delayable(&notif_sleep_work);
+    if (zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE) {
+        k_work_submit_to_queue(zmk_display_work_q(), &boot_wake_work);
+    }
+#endif
+}
+
+void s2mini_screen_notif_wake(void) {
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE)
+    if (zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE) {
+        return;
+    }
+    k_work_submit_to_queue(zmk_display_work_q(), &notif_wake_work);
+    /* A new notification restarts the 6 s; +0.3 s so the popup is gone before blanking. */
+    k_work_reschedule_for_queue(zmk_display_work_q(), &notif_sleep_work,
+                                K_MSEC(NOTIF_POPUP_MS + 300));
+#endif
 }
 
 static void create_launcher(lv_obj_t *v) {
@@ -632,27 +702,40 @@ static void update_timer_view(const struct s2mini_timer *t) {
     switch (t->state) {
     case S2MINI_TIMER_RUNNING:
         fmt_mmss(mmss, sizeof(mmss), t->remaining_ms);
-        lv_label_set_text(t_state, "running");
-        lv_label_set_text(t_hint, "push: pause");
+        set_text_if_changed(t_state, "running");
+        set_text_if_changed(t_hint, "push: pause");
         break;
     case S2MINI_TIMER_PAUSED:
         fmt_mmss(mmss, sizeof(mmss), t->remaining_ms);
-        lv_label_set_text(t_state, "paused");
-        lv_label_set_text(t_hint, "push: go  turn: reset");
+        set_text_if_changed(t_state, "paused");
+        set_text_if_changed(t_hint, "push: go  turn: reset");
         break;
     default:
         fmt_mmss(mmss, sizeof(mmss), t->seconds * 1000);
-        lv_label_set_text(t_state, "");
-        lv_label_set_text(t_hint, "turn: set  push: start");
+        set_text_if_changed(t_state, "");
+        set_text_if_changed(t_hint, "turn: set  push: start");
         break;
     }
-    lv_label_set_text(t_time, mmss);
+    set_text_if_changed(t_time, mmss);
 }
 
 static void update_settings_view(const struct s2mini_ui_settings *c) {
     int sel;
     bool editing;
     s2mini_settings_menu_get(&sel, &editing);
+    /* Redraw only on a change: setting the same styles every 100 ms made LVGL resend the whole
+     * screen over I2C all the time, so a knob step showed up late (and looked like a jump). */
+    static int shown_sel = -1, shown_editing = -1, shown_armed = -1;
+    static struct s2mini_ui_settings shown;
+    int armed = s2mini_update_armed();
+    if (sel == shown_sel && editing == shown_editing && armed == shown_armed &&
+        memcmp(c, &shown, sizeof(shown)) == 0) {
+        return;
+    }
+    shown_sel = sel;
+    shown_editing = editing;
+    shown_armed = armed;
+    shown = *c;
     static char bars[S2MINI_BRIGHTNESS_LEVELS + 1];
     for (int i = 0; i < S2MINI_BRIGHTNESS_LEVELS; i++) {
         bars[i] = i < c->brightness ? '|' : '.';
@@ -663,6 +746,7 @@ static void update_settings_view(const struct s2mini_ui_settings *c) {
         c->invert ? "on" : "off",
         c->clock12 ? "12h" : "24h",
         c->show_wpm ? "on" : "off",
+        armed ? "sure?" : "",
     };
     for (int i = 0; i < S2MINI_SET_COUNT; i++) {
         bool on = i == sel;
@@ -677,7 +761,11 @@ static void update_settings_view(const struct s2mini_ui_settings *c) {
             lv_label_set_text(r->value, values[i]);
         }
     }
-    lv_label_set_text(s_hint, editing ? "turn: change  push: save" : "turn: move  push: change");
+    const char *hint = editing ? "push: save" : "push: change";
+    if (sel == S2MINI_SET_UPDATE) {
+        hint = armed ? "push again!" : "push: update";
+    }
+    set_text_if_changed(s_hint, hint);
 }
 
 /* Brightness and colour inversion go straight to the display driver (display thread). */
@@ -716,6 +804,19 @@ static void show(enum view which) {
     }
 }
 
+static void update_cb(lv_timer_t *timer);
+static lv_timer_t *update_timer;
+
+/* Knob turn / PUSH on the timer, settings or launcher: redraw now instead of within 100 ms. */
+static void knob_watch_cb(lv_timer_t *timer) {
+    static uint32_t seen;
+    uint32_t seq = s2mini_ui_seq() + (s2mini_bootloader_pending() ? 1u << 31 : 0);
+    if (seq != seen && update_timer != NULL) {
+        seen = seq;
+        lv_timer_ready(update_timer);
+    }
+}
+
 static void update_cb(lv_timer_t *timer) {
     char buf[32];
     char clock[8];
@@ -724,6 +825,11 @@ static void update_cb(lv_timer_t *timer) {
     bool have_pc = false;
     struct s2mini_timer t;
     struct s2mini_ui_settings c;
+
+    if (s2mini_bootloader_pending()) {
+        show(VIEW_BOOT);
+        return;
+    }
 
     s2mini_timer_get(&t);
     s2mini_ui_settings_get(&c);
@@ -896,8 +1002,10 @@ lv_obj_t *zmk_display_status_screen(void) {
     create_media(views[VIEW_MEDIA]);
     create_notif(views[VIEW_NOTIF]);
     create_launcher(views[VIEW_LAUNCHER]);
+    create_boot(views[VIEW_BOOT]);
 
     update_cb(NULL);
-    lv_timer_create(update_cb, 100, NULL);
+    update_timer = lv_timer_create(update_cb, 100, NULL);
+    lv_timer_create(knob_watch_cb, 10, NULL);
     return screen;
 }

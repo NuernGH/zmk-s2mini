@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <string.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/logging/log.h>
 
@@ -27,6 +28,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define DONE_SHOW_MS 30000
 
 static struct k_spinlock lock;
+static atomic_t ui_seq; /* bumped on every knob turn / PUSH handled here: the screen redraws at once */
+
+uint32_t s2mini_ui_seq(void) { return (uint32_t)atomic_get(&ui_seq); }
 
 static struct s2mini_ui_settings cfg = {
     .brightness = 3,
@@ -51,6 +55,13 @@ int s2mini_launcher_selected(void) {
     return n > 0 ? launcher_sel % n : 0;
 }
 static bool menu_edit;
+static int64_t update_armed_at; /* 0 = not armed */
+#define UPDATE_ARM_MS 5000
+
+bool s2mini_update_armed(void) {
+    int64_t at = update_armed_at;
+    return at != 0 && k_uptime_get() - at < UPDATE_ARM_MS;
+}
 
 /* Called with the lock held: RUNNING → DONE when time is up, DONE → IDLE after DONE_SHOW_MS. */
 static void timer_refresh_locked(int64_t now) {
@@ -153,6 +164,7 @@ static void settings_store(void) {
 }
 
 void s2mini_ui_knob(int delta) {
+    atomic_inc(&ui_seq);
     int view = s2mini_screen_view();
     int64_t now = k_uptime_get();
     k_spinlock_key_t key = k_spin_lock(&lock);
@@ -184,6 +196,7 @@ void s2mini_ui_knob(int delta) {
             launcher_sel = ((launcher_sel + delta) % n + n) % n;
         }
     } else if (view == S2MINI_VIEW_SETTINGS) {
+        update_armed_at = 0; /* turning cancels the update question */
         if (menu_edit) {
             setting_change_locked(menu_sel, delta);
         } else {
@@ -194,9 +207,11 @@ void s2mini_ui_knob(int delta) {
 }
 
 void s2mini_ui_push(void) {
+    atomic_inc(&ui_seq);
     int view = s2mini_screen_view();
     int64_t now = k_uptime_get();
     bool store = false;
+    bool bootloader = false;
     k_spinlock_key_t key = k_spin_lock(&lock);
     timer_refresh_locked(now);
 
@@ -221,6 +236,14 @@ void s2mini_ui_push(void) {
         default:
             break;
         }
+    } else if (view == S2MINI_VIEW_SETTINGS && menu_sel == S2MINI_SET_UPDATE) {
+        /* Update FW: first PUSH asks, a second PUSH within 5 s restarts into the bootloader. */
+        if (update_armed_at != 0 && now - update_armed_at < UPDATE_ARM_MS) {
+            update_armed_at = 0;
+            bootloader = true;
+        } else {
+            update_armed_at = now;
+        }
     } else if (view == S2MINI_VIEW_SETTINGS) {
         if (menu_edit) {
             store = true;
@@ -241,6 +264,9 @@ void s2mini_ui_push(void) {
     }
     if (store) {
         settings_store();
+    }
+    if (bootloader) {
+        s2mini_enter_bootloader();
     }
 }
 

@@ -5,6 +5,7 @@ Sends data to the keyboard screen (s2mini_oled.Sender) and has a settings window
 - Quick launch: apps for the carousel on the keyboard screen (icons taken from the apps,
   preview exactly as the OLED shows it, icon style, order),
 - Keymap: live keymap editing through ZMK Studio,
+- Firmware: one-button firmware update (keyboard → ROM bootloader → esptool),
 - Screen: what to send (CPU, GPU, iGPU, volume, network, now playing, ports, notifications), language, start with Windows.
 
 Closing the window hides it to the tray; "Quit" in the icon menu ends the program.
@@ -27,6 +28,7 @@ from PIL import Image, ImageDraw
 import i18n
 import icons
 from i18n import tr
+import firmware_tab
 import keymap_tab
 import s2mini_oled as core
 
@@ -305,7 +307,7 @@ class Window(ctk.CTk):
         ctk.CTkLabel(side, text=tr("keyboard screen"), text_color=MUTED).pack(anchor="w", padx=20, pady=(0, 18))
         self.pages, self.nav = {}, {}
         for key, label in (("launcher", tr("Quick launch")), ("keymap", tr("Keymap")), ("screen", tr("Screen")),
-                           ("status", tr("Status"))):
+                           ("firmware", tr("Firmware")), ("status", tr("Status"))):
             b = ctk.CTkButton(side, text=label, anchor="w", height=36, corner_radius=8,
                               fg_color="transparent", hover_color=CARD_HI, command=lambda k=key: self.show(k))
             b.pack(fill="x", padx=12, pady=2)
@@ -320,6 +322,7 @@ class Window(ctk.CTk):
         self.pages["launcher"] = self._launcher_page(body)
         self.pages["keymap"] = keymap_tab.KeymapPage(body, self._header)
         self.pages["screen"] = self._screen_page(body)
+        self.pages["firmware"] = firmware_tab.FirmwarePage(body, self._header, self.sender)
         self.pages["status"] = self._status_page(body)
         self.show("launcher")
         self.after(500, self._tick)

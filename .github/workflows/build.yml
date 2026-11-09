@@ -12,6 +12,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,3 +76,18 @@ jobs:
         with:
           name: firmware-s2mini
           path: ws/out/
+
+      # Pushes keep firmware/ in the repo up to date, so the image can be downloaded straight
+      # from the repo (raw link) without logging in to GitHub. "[skip ci]" stops a build loop.
+      - name: Commit firmware to firmware/
+        if: github.event_name == 'push'
+        working-directory: ws/zmk-s2mini
+        run: |
+          cp ../out/s2mini_60-0x0.bin firmware/
+          ( cd firmware && sha256sum s2mini_60-0x0.bin > SHA256SUMS )
+          if git diff --quiet -- firmware; then echo "firmware unchanged"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firmware
+          git commit -m "Firmware image for ${GITHUB_SHA::7} [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

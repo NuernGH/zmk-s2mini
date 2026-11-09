@@ -68,6 +68,8 @@ struct s2mini_notif {
     int64_t at; /* when it arrived (0 = never) */
 };
 void s2mini_notif_get(struct s2mini_notif *out);
+/* A new notification arrived: if the screen is blanked (idle), wake it for the popup (status_screen.c). */
+void s2mini_screen_notif_wake(void);
 
 /*
  * Quick launch (frames 0x05 name, 0x06 icon): app list from the PC app.
@@ -115,7 +117,14 @@ struct s2mini_timer {
     int done_ms;      /* ms since the time ran out (DONE) */
 };
 
-enum s2mini_setting { S2MINI_SET_BRIGHTNESS, S2MINI_SET_INVERT, S2MINI_SET_CLOCK, S2MINI_SET_WPM, S2MINI_SET_COUNT };
+enum s2mini_setting {
+    S2MINI_SET_BRIGHTNESS,
+    S2MINI_SET_INVERT,
+    S2MINI_SET_CLOCK,
+    S2MINI_SET_WPM,
+    S2MINI_SET_UPDATE, /* firmware update: PUSH twice within 5 s → ROM bootloader */
+    S2MINI_SET_COUNT
+};
 
 struct s2mini_ui_settings {
     uint8_t brightness; /* 1..5 */
@@ -136,3 +145,17 @@ bool s2mini_ui_knob_captured(void);
 bool s2mini_ui_push_captured(void);
 void s2mini_ui_knob(int delta);
 void s2mini_ui_push(void);
+/* Changes on every knob turn / PUSH on these views; the screen polls it to redraw without waiting. */
+uint32_t s2mini_ui_seq(void);
+/* SETTINGS → Update FW: the first PUSH arms it for 5 s (the screen asks to push again). */
+bool s2mini_update_armed(void);
+
+/*
+ * Restart into the ESP32-S2 ROM bootloader (USB 303A:0002) to flash new firmware with esptool,
+ * without the 0 + RST buttons (src/bootloader.c). From SETTINGS → Update FW or a Raw HID command.
+ */
+void s2mini_enter_bootloader(void);
+/* True from the bootloader request until the restart: the screen shows BOOT. */
+bool s2mini_bootloader_pending(void);
+/* Wake a blanked screen so BOOT is visible (status_screen.c). */
+void s2mini_screen_boot_wake(void);

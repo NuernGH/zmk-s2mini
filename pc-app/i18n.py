@@ -167,4 +167,28 @@ PL = {
     'decode error': 'błąd dekodowania',
     'encode error': 'błąd kodowania',
     'connected': 'połączono',
+    'Firmware': 'Firmware',
+    'Update the keyboard firmware without the 0 + RST buttons. On the keyboard itself:\nSETTINGS view → Update FW, push the knob twice (then flash with this page or esptool).':
+        'Aktualizacja firmware klawiatury bez przycisków 0 + RST. Na samej klawiaturze:\nwidok SETTINGS → Update FW, dwa razy wciśnij gałkę (potem wgraj tą stroną albo esptoolem).',
+    'Update firmware (latest from GitHub)': 'Aktualizuj firmware (najnowszy z GitHuba)',
+    'From file…': 'Z pliku…',
+    'Keymap changes saved from Studio stay (the whole flash is not erased).':
+        'Zmiany keymapy zapisane ze Studio zostają (cała pamięć nie jest kasowana).',
+    'Firmware image (flash at 0x0)': 'Obraz firmware (wgrywany od 0x0)',
+    'Downloading firmware from GitHub…': 'Pobieram firmware z GitHuba…',
+    'SHA256SUMS has no entry for {f}': 'W SHA256SUMS brak wpisu dla {f}',
+    'checksum does not match (download damaged?)': 'suma kontrolna się nie zgadza (uszkodzone pobieranie?)',
+    'Downloaded {n} KB, SHA256 {h}… OK': 'Pobrano {n} KB, SHA256 {h}… OK',
+    'File {f}, SHA256 {h}…': 'Plik {f}, SHA256 {h}…',
+    'The keyboard is already in the bootloader ({p}).': 'Klawiatura już jest w bootloaderze ({p}).',
+    'The keyboard is not connected (Raw HID). Connect it, or enter the bootloader with 0 + RST and press the button again.':
+        'Klawiatura nie jest połączona (Raw HID). Podłącz ją albo wejdź w bootloader przez 0 + RST i naciśnij przycisk jeszcze raz.',
+    'Keyboard restarting into the bootloader…': 'Klawiatura przełącza się w bootloader…',
+    'No bootloader port (303A:0002) after 15 s. Old firmware without this option? Hold 0, press RST and press the button again.':
+        'Po 15 s nie ma portu bootloadera (303A:0002). Stary firmware bez tej opcji? Przytrzymaj 0, naciśnij RST i naciśnij przycisk jeszcze raz.',
+    'Bootloader on {p}. Flashing…': 'Bootloader na {p}. Wgrywam…',
+    'Done. The keyboard is restarting; if it does not come back in a few seconds, unplug and replug USB.':
+        'Gotowe. Klawiatura się restartuje; jeśli nie wróci po kilku sekundach, odłącz i podłącz USB.',
+    'ERROR: {e}': 'BŁĄD: {e}',
+    'Retrying without the flasher stub ({e})…': 'Ponawiam bez stuba esptoola ({e})…',
 }
