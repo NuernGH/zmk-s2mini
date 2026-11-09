@@ -1,7 +1,7 @@
-"""Klient ZMK Studio (RPC przez port COM klawiatury) — bez zewnętrznych bibliotek protobuf.
+"""ZMK Studio client (RPC over the keyboard's COM port), without external protobuf libraries.
 
-Ramka: 0xAB, bajty wiadomości (0xAB/0xAC/0xAD poprzedzone 0xAC), 0xAD.
-Wiadomości zgodne z zmk-studio-messages (studio.proto, core/keymap/behaviors.proto).
+Frame: 0xAB, message bytes (0xAB/0xAC/0xAD prefixed with 0xAC), 0xAD.
+Messages follow zmk-studio-messages (studio.proto, core/keymap/behaviors.proto).
 """
 
 import threading
@@ -11,7 +11,7 @@ SOF, ESC, EOF = 0xAB, 0xAC, 0xAD
 ZMK_VID, ZMK_PID = 0x1D50, 0x615E
 
 
-# ---------- minimalny protobuf ----------
+# ---------- minimal protobuf ----------
 
 def _varint(n):
     n &= (1 << 64) - 1
@@ -49,7 +49,7 @@ def f_bytes(field, data):
 
 
 def parse(buf):
-    """bytes -> {pole: [wartości]}; varint jako int, length-delimited jako bytes."""
+    """bytes -> {field: [values]}; varint as int, length-delimited as bytes."""
     out, i = {}, 0
     while i < len(buf):
         key, i = _read_varint(buf, i)
@@ -64,7 +64,7 @@ def parse(buf):
         elif wt == 1:
             v, i = int.from_bytes(buf[i:i + 8], "little"), i + 8
         else:
-            raise ValueError("zły typ pola")
+            raise ValueError("bad wire type")
         out.setdefault(field, []).append(v)
     return out
 
@@ -86,12 +86,12 @@ def one(msg, field, default=None):
 
 
 def i32(n):
-    """uint64 z varinta -> int32 (pola int32 ujemne kodowane na 10 bajtach)."""
+    """uint64 from a varint -> int32 (negative int32 fields are encoded in 10 bytes)."""
     n &= 0xFFFFFFFF
     return n - (1 << 32) if n & 0x80000000 else n
 
 
-# ---------- ramki ----------
+# ---------- frames ----------
 
 def frame(payload):
     out = bytearray([SOF])
@@ -127,14 +127,14 @@ class Deframer:
         return msgs
 
 
-# ---------- dane ----------
+# ---------- data ----------
 
 class StudioError(Exception):
     pass
 
 
-META_ERRORS = {0: "błąd ogólny", 1: "klawiatura zablokowana", 2: "nieznane zapytanie",
-               3: "błąd dekodowania", 4: "błąd kodowania"}
+META_ERRORS = {0: "general error", 1: "keyboard is locked", 2: "unknown request",
+               3: "decode error", 4: "encode error"}
 
 
 def _binding(raw):
@@ -198,10 +198,10 @@ def _layouts(raw):
     return {"active": one(m, 1, 0), "layouts": layouts}
 
 
-# ---------- połączenie ----------
+# ---------- connection ----------
 
 def find_port():
-    """Port COM klawiatury ZMK (1D50:615E) albo None."""
+    """COM port of the ZMK keyboard (1D50:615E) or None."""
     try:
         from serial.tools import list_ports
     except ImportError:
@@ -274,7 +274,7 @@ class Studio:
                 pass
 
     def _call(self, subsystem, request):
-        """Wysyła Request i zwraca bajty odpowiedzi podsystemu (Response danego podsystemu)."""
+        """Sends a Request and returns the subsystem's response bytes (that subsystem's Response)."""
         with self.lock:
             rid = self.next_id
             self.next_id += 1
@@ -283,20 +283,20 @@ class Studio:
         with self.cond:
             while rid not in self.responses:
                 if self.closed:
-                    raise StudioError("połączenie zamknięte")
+                    raise StudioError("connection closed")
                 left = end - time.monotonic()
                 if left <= 0:
-                    raise StudioError("brak odpowiedzi klawiatury")
+                    raise StudioError("no response from keyboard")
                 self.cond.wait(left)
             rr = self.responses.pop(rid)
         if 2 in rr:
             meta = parse(one(rr, 2))
             if 2 in meta:
                 code = one(meta, 2)
-                raise StudioError(META_ERRORS.get(code, f"błąd {code}"))
-            raise StudioError("brak odpowiedzi")
+                raise StudioError(META_ERRORS.get(code, f"error {code}"))
+            raise StudioError("no response")
         if subsystem not in rr:
-            raise StudioError("nieoczekiwana odpowiedź")
+            raise StudioError("unexpected response")
         return parse(one(rr, subsystem))
 
     # core
@@ -340,7 +340,7 @@ class Studio:
         req = f_int(1, layer_id) + f_int(2, position) + f_bytes(3, b)
         code = one(self._call(self.KEYMAP, f_bytes(2, req)), 2, 0)
         if code:
-            raise StudioError({1: "zła pozycja", 2: "zła akcja", 3: "złe parametry"}.get(code, f"błąd {code}"))
+            raise StudioError({1: "invalid position", 2: "invalid action", 3: "invalid parameters"}.get(code, f"error {code}"))
 
     def unsaved(self):
         return bool(one(self._call(self.KEYMAP, f_int(3, 1)), 3, 0))
@@ -348,7 +348,7 @@ class Studio:
     def save(self):
         r = parse(one(self._call(self.KEYMAP, f_int(4, 1)), 4, b""))
         if 2 in r and one(r, 2):
-            raise StudioError({2: "zapis nieobsługiwany", 3: "brak miejsca"}.get(one(r, 2), "błąd zapisu"))
+            raise StudioError({2: "saving not supported", 3: "no space left"}.get(one(r, 2), "save error"))
 
     def discard(self):
         self._call(self.KEYMAP, f_int(5, 1))
@@ -356,22 +356,22 @@ class Studio:
     def set_layer_name(self, layer_id, name):
         code = one(self._call(self.KEYMAP, f_bytes(12, f_int(1, layer_id) + f_bytes(2, name))), 12, 0)
         if code:
-            raise StudioError("nie udało się zmienić nazwy warstwy")
+            raise StudioError("could not rename layer")
 
     def add_layer(self):
         r = parse(one(self._call(self.KEYMAP, f_bytes(9, b"")), 9, b""))
         if 2 in r and one(r, 2):
-            raise StudioError("brak miejsca na warstwę" if one(r, 2) == 2 else "nie udało się dodać warstwy")
+            raise StudioError("no space for another layer" if one(r, 2) == 2 else "could not add layer")
         d = parse(one(r, 1, b""))
         return one(d, 1, 0), _layer(one(d, 2, b""))
 
     def remove_layer(self, index):
         r = parse(one(self._call(self.KEYMAP, f_bytes(10, f_int(1, index))), 10, b""))
         if 2 in r and one(r, 2):
-            raise StudioError("nie udało się usunąć warstwy")
+            raise StudioError("could not remove layer")
 
     def move_layer(self, start, dest):
         r = parse(one(self._call(self.KEYMAP, f_bytes(8, f_int(1, start) + f_int(2, dest))), 8, b""))
         if 2 in r and one(r, 2):
-            raise StudioError("nie udało się przesunąć warstwy")
+            raise StudioError("could not move layer")
         return _keymap(one(r, 1, b""))

@@ -1,6 +1,6 @@
 /*
- * Gałka z trybami: &knob (zachowanie czujnika) przekazuje obrót do zachowania aktywnego
- * trybu, &knob_next przełącza tryb po kolei.
+ * Knob with modes: &knob (sensor behavior) forwards rotation to the behavior of the active
+ * mode, &knob_next cycles through the modes.
  * SPDX-License-Identifier: MIT
  */
 
@@ -31,11 +31,11 @@ static const char *const mode_devs[] = {
 static const char *const mode_names[] = DT_PROP(KNOB_NODE, mode_names);
 
 BUILD_ASSERT(ARRAY_SIZE(mode_devs) == ARRAY_SIZE(mode_names),
-             "knob modes: modes i mode-names muszą mieć tyle samo pozycji");
+             "knob modes: modes and mode-names must have the same number of entries");
 
 static atomic_t current_mode;
 static atomic_t pending_mode;
-static atomic_t captured; /* ostatni obrót poszedł do ekranu */
+static atomic_t captured; /* the last rotation went to the screen */
 static int64_t changed_at;
 
 int s2mini_knob_mode_count(void) { return ARRAY_SIZE(mode_devs); }
@@ -52,16 +52,16 @@ static struct zmk_behavior_binding mode_binding(int mode) {
     return (struct zmk_behavior_binding){.behavior_dev = mode_devs[mode]};
 }
 
-/* Obrót: dane i wykonanie idą zawsze do tego samego trybu (zapamiętanego w accept_data). */
+/* Rotation: data and execution always go to the same mode (remembered in accept_data). */
 static int knob_accept_data(struct zmk_behavior_binding *binding,
                             struct zmk_behavior_binding_event event,
                             const struct zmk_sensor_config *sensor_config,
                             size_t channel_data_size,
                             const struct zmk_sensor_channel_data *channel_data) {
 #if IS_ENABLED(CONFIG_S2MINI_STATUS_SCREEN)
-    /* Widoki TIMER i SETTINGS: gałka steruje ekranem, nic nie idzie do komputera. */
+    /* TIMER and SETTINGS views: the knob controls the screen, nothing goes to the computer. */
     if (s2mini_ui_knob_captured()) {
-        static int64_t acc; /* mikrostopnie */
+        static int64_t acc; /* micro-degrees */
         const struct sensor_value value = channel_data[0].value;
         int64_t step = 360000000LL / MAX(sensor_config->triggers_per_rotation, 1);
         acc += (int64_t)value.val1 * 1000000 + value.val2;
@@ -77,7 +77,7 @@ static int knob_accept_data(struct zmk_behavior_binding *binding,
 #endif
     int mode = atomic_get(&current_mode);
 #if IS_ENABLED(CONFIG_S2MINI_STATUS_SCREEN)
-    /* Widok NOW PLAYING: gałka zawsze przełącza utwory (tryb TRACK), bez zmiany trybu. */
+    /* NOW PLAYING view: the knob always changes tracks (TRACK mode) without changing the mode. */
     if (s2mini_screen_view() == S2MINI_VIEW_MEDIA) {
         for (int i = 0; i < ARRAY_SIZE(mode_names); i++) {
             if (strcmp(mode_names[i], "TRACK") == 0) {
@@ -115,17 +115,17 @@ BEHAVIOR_DT_DEFINE(KNOB_NODE, NULL, NULL, NULL, NULL, POST_KERNEL,
 
 #if DT_NODE_EXISTS(NEXT_NODE)
 
-static bool push_play_pause; /* PUSH na NOW PLAYING wysłał play/pauzę, puszczenie ją zwalnia */
+static bool push_play_pause; /* PUSH on NOW PLAYING sent play/pause; releasing PUSH releases it */
 
 static int knob_next_pressed(struct zmk_behavior_binding *binding,
                              struct zmk_behavior_binding_event event) {
 #if IS_ENABLED(CONFIG_S2MINI_STATUS_SCREEN)
-    /* Widok NOW PLAYING: PUSH = play/pauza. */
+    /* NOW PLAYING view: PUSH = play/pause. */
     if (!s2mini_ui_push_captured() && s2mini_screen_view() == S2MINI_VIEW_MEDIA) {
         push_play_pause = true;
         return raise_zmk_keycode_state_changed_from_encoded(C_PP, true, event.timestamp);
     }
-    /* Na widokach minutnika i ustawień (albo gdy dzwoni minutnik) PUSH zatwierdza. */
+    /* On the timer and settings views (or while the timer rings) PUSH confirms. */
     if (s2mini_ui_push_captured()) {
         s2mini_ui_push();
         return ZMK_BEHAVIOR_OPAQUE;
@@ -160,7 +160,7 @@ BEHAVIOR_DT_DEFINE(NEXT_NODE, NULL, NULL, NULL, NULL, POST_KERNEL,
 
 #endif /* NEXT_NODE */
 
-#else /* brak gałki z trybami */
+#else /* no knob with modes */
 
 int s2mini_knob_mode_count(void) { return 0; }
 int s2mini_knob_mode_index(void) { return 0; }

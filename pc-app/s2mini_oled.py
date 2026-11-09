@@ -1,22 +1,22 @@
 """
-Wysyła dane z PC na ekran klawiatury S2 mini 60 (ZMK, Raw HID):
-głośność, obciążenie i temperatura CPU/GPU, godzina (raz na sekundę)
-oraz listę podłączonych portów COM (co 2 s), to, co gra (tytuł/wykonawca), i prędkość sieci.
+Sends PC data to the S2 mini 60 keyboard screen (ZMK, Raw HID):
+volume, CPU/GPU load and temperature, time of day (once a second),
+the list of connected COM ports (every 2 s), what is playing (title/artist) and network speed.
 
-Źródła danych (Windows):
-- głośność: pycaw (domyślne wyjście audio),
-- CPU/GPU: LibreHardwareMonitor z włączonym „Remote Web Server” (http://localhost:8085),
-  a bez niego obciążenie CPU z psutil i GPU NVIDIA z nvidia-smi (bez temperatury CPU),
-- godzina: zegar systemu,
-- porty COM: pyserial (nazwy znanych płytek po VID:PID),
-- co gra: Windows Media (pakiety winrt-*, opcjonalnie; bez nich ekran pokaże „nothing playing”),
-- sieć: psutil (suma wszystkich kart),
-- powiadomienia: Windows UserNotificationListener (te same pakiety winrt + UI.Notifications);
-  na ekran idzie aplikacja, tytuł i początek treści nowego powiadomienia (--no-notifications wyłącza).
+Data sources (Windows):
+- volume: pycaw (default audio output),
+- CPU/GPU: LibreHardwareMonitor with "Remote Web Server" enabled (http://localhost:8085),
+  otherwise CPU load from psutil and NVIDIA GPU from nvidia-smi (no CPU temperature),
+- time: system clock,
+- COM ports: pyserial (known boards named by VID:PID),
+- now playing: Windows Media (winrt-* packages, optional; without them the screen shows "nothing playing"),
+- network: psutil (sum of all adapters),
+- notifications: Windows UserNotificationListener (same winrt packages + UI.Notifications);
+  the screen gets the app, title and start of the body of a new notification (--no-notifications disables).
 
-Uruchomienie:  pythonw s2mini_oled.py          (ikona w zasobniku, gdy jest pystray)
-               python  s2mini_oled.py --console (wypisuje wysyłane dane)
-               python  s2mini_oled.py --dry-run  (bez klawiatury, tylko odczyt danych)
+Usage:  pythonw s2mini_oled.py          (tray icon, if pystray is installed)
+        python  s2mini_oled.py --console (prints the data being sent)
+        python  s2mini_oled.py --dry-run  (no keyboard, only reads the data)
 
 SPDX-License-Identifier: MIT
 """
@@ -45,7 +45,7 @@ F_CPU, F_GPU, F_VOLUME, F_TIME, F_MUTED, F_IGPU, F_NET = 1, 2, 4, 8, 16, 32, 64
 LHM_URL = "http://localhost:8085/data.json"
 
 
-# ---------- dane ----------
+# ---------- data ----------
 
 def _num(text):
     """'54,3 °C' / '23.0 %' -> 54.3"""
@@ -65,9 +65,9 @@ CPU_TEMP_NAMES = ("cpu package", "core (tctl/tdie)", "package", "core (tctl)", "
 
 
 def read_lhm(url=LHM_URL):
-    """Zwraca dict cpu_load, cpu_temp, gpu_load, gpu_temp, igpu_load (brakujące = None) z LibreHardwareMonitor.
+    """Returns a dict cpu_load, cpu_temp, gpu_load, gpu_temp, igpu_load (missing = None) from LibreHardwareMonitor.
 
-    gpu_* = karta (NVIDIA/AMD), igpu_load = zintegrowany Intel (LHM daje mu tylko obciążenie „D3D 3D”).
+    gpu_* = graphics card (NVIDIA/AMD), igpu_load = integrated Intel (LHM only gives its "D3D 3D" load).
     """
     with urllib.request.urlopen(url, timeout=0.8) as r:
         tree = json.load(r)
@@ -113,7 +113,7 @@ def read_nvidia_smi():
 
 
 class Volume:
-    """Głośność domyślnego wyjścia (pycaw). Odświeża urządzenie co kilka sekund."""
+    """Volume of the default output (pycaw). Refreshes the device every few seconds."""
 
     def __init__(self):
         self.endpoint = None
@@ -129,7 +129,7 @@ class Volume:
             from pycaw.pycaw import AudioUtilities
             speakers = AudioUtilities.GetSpeakers()
             ep = getattr(speakers, "EndpointVolume", None)
-            if ep is None:  # starsze pycaw
+            if ep is None:  # older pycaw
                 from ctypes import POINTER, cast
                 from comtypes import CLSCTX_ALL
                 from pycaw.pycaw import IAudioEndpointVolume
@@ -208,7 +208,7 @@ def frame(data):
     return bytes(b)
 
 
-# ---------- porty COM ----------
+# ---------- COM ports ----------
 
 KNOWN_USB = {
     (0x303A, 0x0002): "ESP32-S2 boot",
@@ -250,7 +250,7 @@ def list_com_ports():
 
 
 def port_frames(labels):
-    """Ramki 0x02: po jednej na port; przy pustej liście jedna ramka z liczbą 0."""
+    """Frames 0x02: one per port; an empty list is one frame with count 0."""
     frames = []
     count = min(len(labels), 255)
     for i, text in enumerate(labels[:255] or [None]):
@@ -263,10 +263,10 @@ def port_frames(labels):
     return frames
 
 
-# ---------- sieć ----------
+# ---------- network ----------
 
 class NetRate:
-    """Prędkość sieci w KB/s (pobieranie, wysyłanie) z różnicy liczników psutil."""
+    """Network speed in KB/s (download, upload) from the difference of psutil counters."""
 
     def __init__(self):
         self.last = None
@@ -285,7 +285,7 @@ class NetRate:
         return ((c.bytes_recv - prev[1]) / dt / 1000, (c.bytes_sent - prev[2]) / dt / 1000)
 
 
-# ---------- co gra ----------
+# ---------- now playing ----------
 
 PL = str.maketrans("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ", "acelnoszzACELNOSZZ")
 
@@ -298,10 +298,10 @@ def to_ascii(text):
 
 
 class Background:
-    """Wywołuje fn() co `every` s w osobnym wątku; read() zwraca ostatni wynik bez czekania.
+    """Calls fn() every `every` s in its own thread; read() returns the last result without waiting.
 
-    Zapytania Windows (winrt) potrafią się zawiesić; wtedy blokują tylko ten wątek, a wysyłanie
-    do klawiatury idzie dalej. Wynik starszy niż `max_age` s uznajemy za brak danych.
+    Windows queries (winrt) can hang; then they block only this thread, and sending
+    to the keyboard carries on. A result older than `max_age` s counts as no data.
     """
 
     def __init__(self, fn, every=1.0, max_age=5.0):
@@ -311,7 +311,7 @@ class Background:
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
-        # winrt potrzebuje COM w tym wątku: MTA (bez pętli komunikatów; STA z pycaw zawieszał await)
+        # winrt needs COM in this thread: MTA (no message loop; STA from pycaw made await hang)
         if os.name == "nt":
             try:
                 import ctypes
@@ -334,7 +334,7 @@ class Background:
 
 
 class Media:
-    """Tytuł, wykonawca i stan odtwarzania z Windows (GSMTC). Bez pakietów winrt zwraca None."""
+    """Title, artist and playback state from Windows (GSMTC). Returns None without the winrt packages."""
 
     def __init__(self):
         self.ok = True
@@ -369,15 +369,15 @@ class Media:
 
 
 def media_child():
-    """Tryb `--media-child`: osobny proces z COM jak w wątku głównym; co 1 s jedna linia JSON.
+    """`--media-child` mode: a separate process with COM set up like the main thread; one JSON line per second.
 
-    winrt (GSMTC) w wątku pobocznym programu zwracał pusto albo się zawieszał, a w osobnym procesie
-    działa jak w pierwszej wersji skryptu. Kończy się, gdy program główny zamknie stdin.
+    winrt (GSMTC) in a worker thread of the app returned nothing or hung, while in a separate process
+    it works as in the first version of the script. Exits when the main program closes stdin.
     """
     if os.name == "nt":
         try:
             import ctypes
-            ctypes.windll.ole32.CoInitializeEx(None, 2)  # COINIT_APARTMENTTHREADED, jak comtypes
+            ctypes.windll.ole32.CoInitializeEx(None, 2)  # COINIT_APARTMENTTHREADED, like comtypes
         except Exception:
             pass
     threading.Thread(target=lambda: (sys.stdin.read(), os._exit(0)), daemon=True).start()
@@ -393,12 +393,12 @@ def media_child():
         except Exception:
             os._exit(0)
         if not media.ok:
-            os._exit(0)  # brak winrt: nie ma po co działać
+            os._exit(0)  # no winrt: nothing to do
         time.sleep(1.0)
 
 
 class MediaProcess:
-    """Uruchamia `--media-child` i trzyma ostatni wynik; zawieszony proces jest zabijany i startuje od nowa."""
+    """Runs `--media-child` and keeps the last result; a hung process is killed and restarted."""
 
     STALE_S = 10.0
 
@@ -437,11 +437,11 @@ class MediaProcess:
             p = self.proc
             now = time.monotonic()
             if (p is None or p.poll() is not None) and now < next_try:
-                pass  # po zawieszeniu Windows czekamy coraz dłużej (do 60 s), żeby nie mnożyć procesów
+                pass  # after Windows hangs, wait longer each time (up to 60 s) so processes don't pile up
             elif p is None or p.poll() is not None:
                 if p is not None and now - self.started < 5:
                     fails += 1
-                    if fails >= 3:  # kończy się od razu (np. brak winrt) — dajemy spokój
+                    if fails >= 3:  # exits right away (e.g. no winrt): give up
                         self.disabled = True
                         return
                 try:
@@ -471,7 +471,7 @@ class MediaProcess:
 
 
 def media_frames(state, title, artist):
-    """Ramki 0x03: tytuł, potem wykonawca (ASCII, do 28 znaków)."""
+    """Frames 0x03: title, then artist (ASCII, up to 28 characters)."""
     frames = []
     for field, text in ((0, title), (1, artist)):
         b = bytearray(REPORT_SIZE)
@@ -482,10 +482,10 @@ def media_frames(state, title, artist):
     return frames
 
 
-# ---------- powiadomienia ----------
+# ---------- notifications ----------
 
 class Notifications:
-    """Nowe powiadomienia Windows (toast). Pierwszy odczyt tylko zapamiętuje istniejące."""
+    """New Windows notifications (toasts). The first read only remembers the existing ones."""
 
     def __init__(self):
         self.ok = True
@@ -493,7 +493,7 @@ class Notifications:
         self.seq = 0
 
     def read(self):
-        """Zwraca listę nowych (aplikacja, tytuł, treść), najstarsze pierwsze."""
+        """Returns a list of new (app, title, body), oldest first."""
         if not self.ok:
             return []
         try:
@@ -539,7 +539,7 @@ class Notifications:
             return []
         new = [i[1:] for i in items if i[0] not in self.seen]
         self.seen = ids
-        return new[-1:]  # na ekran tylko najnowsze
+        return new[-1:]  # only the newest goes to the screen
 
     def frames(self, app, title, body):
         self.seq = (self.seq + 1) % 256
@@ -553,14 +553,14 @@ class Notifications:
         return frames
 
 
-# ---------- ustawienia ----------
+# ---------- settings ----------
 
 DATA_KEYS = ("cpu", "gpu", "igpu", "volume", "net", "media", "ports", "notifications")
 DEFAULT_CONFIG = {
     "data": {k: k != "notifications" for k in DATA_KEYS},
-    "apps": [],  # {"name", "path", "style", "invert", "icon"(opcjonalny obrazek)}
+    "apps": [],  # {"name", "path", "style", "invert", "icon" (optional image)}
     "default_style": "auto",
-    "language": "auto",  # auto = jak Windows, albo "pl" / "en"
+    "language": "auto",  # auto = same as Windows, or "pl" / "en"
 }
 
 
@@ -594,17 +594,17 @@ def save_config(cfg):
     os.replace(tmp, path)
 
 
-# ---------- szybki start ----------
+# ---------- quick launch ----------
 
 def app_icon_bits(app):
-    """128 B ikony aplikacji w stylu z ustawień."""
+    """128 B app icon in the style from the settings."""
     import icons
     src = icons.extract_icon(app.get("icon") or app["path"])
     return icons.pack_bits(icons.to_keyboard(src, app.get("style", "auto"), app.get("invert", False)))
 
 
 def app_frames(apps, icon_cache):
-    """Ramki 0x05 (nazwa) i 0x06 (5 kawałków ikony) dla każdej aplikacji; pusta lista = jedna ramka."""
+    """Frames 0x05 (name) and 0x06 (5 icon chunks) for each app; an empty list = one frame."""
     frames = []
     count = min(len(apps), APPS_MAX)
     if count == 0:
@@ -637,7 +637,7 @@ def launch_app(app, log=print):
     path = app.get("path")
     try:
         if os.name == "nt" and path.lower().startswith("shell:appsfolder"):
-            subprocess.Popen(["explorer.exe", path])  # aplikacja ze Sklepu / MSIX
+            subprocess.Popen(["explorer.exe", path])  # Store / MSIX app
         elif os.name == "nt":
             os.startfile(path)
         else:
@@ -647,7 +647,7 @@ def launch_app(app, log=print):
         log(f"launch failed: {path}: {e}")
 
 
-# ---------- klawiatura ----------
+# ---------- keyboard ----------
 
 def open_keyboard():
     import hid
@@ -660,10 +660,10 @@ def open_keyboard():
 
 
 class HidLink:
-    """Połączenie z kanałem Raw HID: osobny wątek zapisu i osobny wątek odczytu, każdy z własnym
-    uchwytem. Gdy wywołanie hidapi utknie (bywa na Windows mimo limitu czasu), główna pętla tego
-    nie odczuwa: stuck() zgłasza zastój, a Sender otwiera nowe połączenie (stare wątki zostają
-    porzucone)."""
+    """Raw HID link: a separate writer thread and reader thread, each with its own
+    handle. When a hidapi call gets stuck (happens on Windows despite the timeout), the main loop
+    does not notice: stuck() reports the stall and Sender opens a new link (the old threads are
+    abandoned)."""
 
     STUCK_S = 4.0
 
@@ -672,7 +672,7 @@ class HidLink:
         self.queue = queue.Queue(maxsize=400)
         self.on_launch, self.log = on_launch, log
         self.dead = threading.Event()
-        self.busy_since = None  # czas początku bieżącego zapisu
+        self.busy_since = None  # start time of the current write
         self.wdev = open_keyboard()
         if self.wdev is None:
             raise OSError("keyboard not found")
@@ -686,7 +686,7 @@ class HidLink:
             try:
                 self.queue.put_nowait(p)
             except Exception:
-                break  # kolejka pełna: zapis stoi, stuck() to zgłosi
+                break  # queue full: writing is stuck, stuck() will report it
 
     def stuck(self):
         b = self.busy_since
@@ -699,7 +699,7 @@ class HidLink:
                 return
             self.busy_since = time.monotonic()
             try:
-                # Windows/hidapi: pierwszy bajt to numer raportu (0 = bez numeru).
+                # Windows/hidapi: the first byte is the report number (0 = no number).
                 if self.wdev.write(b"\x00" + payload) < 0:
                     raise OSError("write failed")
             except Exception as e:
@@ -714,7 +714,7 @@ class HidLink:
                 data = self.rdev.read(64, 500)
             except Exception as e:
                 self.log(f"read: {e}")
-                return  # bez odczytu nie ma szybkiego startu, ale wysyłanie działa dalej
+                return  # without reading there is no quick launch, but sending carries on
             if data and len(data) >= 3 and data[0] == MAGIC and data[1] == LAUNCH:
                 try:
                     self.on_launch(data[2])
@@ -722,7 +722,7 @@ class HidLink:
                     self.log(f"launch: {e}")
 
     def close(self):
-        """Zamyka bez czekania (zamknięcie uchwytu w osobnym wątku, bo też potrafi utknąć)."""
+        """Closes without waiting (the handle is closed in its own thread, because that can hang too)."""
         self.dead.set()
         try:
             self.queue.put_nowait(None)
@@ -756,7 +756,7 @@ class Sender(threading.Thread):
             print(*a, flush=True)
 
     def set_config(self, cfg):
-        """Nowe ustawienia z okna (lista aplikacji wysyłana od razu)."""
+        """New settings from the window (the app list is sent right away)."""
         self.config = copy.deepcopy(cfg)
         self.config_version += 1
 
@@ -779,7 +779,7 @@ class Sender(threading.Thread):
         link = None
         try:
             import psutil
-            psutil.cpu_percent(interval=None)  # pierwszy odczyt zawsze 0
+            psutil.cpu_percent(interval=None)  # the first reading is always 0
         except Exception:
             pass
         tick = 0
@@ -798,9 +798,9 @@ class Sender(threading.Thread):
                     payloads += notes.frames(app, title, body)
                     data["notif"] = to_ascii(app)
             else:
-                notes.seen = None  # po włączeniu nie wysyłaj starych
+                notes.seen = None  # after enabling, don't send old ones
                 new_notes.clear()
-            # lista aplikacji: po zmianie, po podłączeniu i co 20 s
+            # app list: after a change, after connecting and every 20 s
             if sent_version != self.config_version or tick % 20 == 0:
                 payloads += app_frames(self.config.get("apps", []), icon_cache)
                 sent_version = self.config_version
@@ -871,9 +871,9 @@ def main():
         media_child()
         return
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--console", action="store_true", help="bez ikony w zasobniku, wypisuje dane")
-    ap.add_argument("--dry-run", action="store_true", help="tylko odczyt danych, bez klawiatury")
-    ap.add_argument("--no-notifications", action="store_true", help="nie wysyłaj powiadomień Windows na ekran")
+    ap.add_argument("--console", action="store_true", help="no tray icon, prints the data")
+    ap.add_argument("--dry-run", action="store_true", help="only read the data, no keyboard")
+    ap.add_argument("--no-notifications", action="store_true", help="don't send Windows notifications to the screen")
     args = ap.parse_args()
 
     sender = Sender(console=args.console or args.dry_run, dry_run=args.dry_run,
@@ -889,7 +889,7 @@ def main():
     try:
         run_tray(sender)
     except ImportError:
-        print("pystray nie jest zainstalowany: działam w konsoli (Ctrl+C kończy).")
+        print("pystray is not installed: running in the console (Ctrl+C quits).")
         sender.console = True
         try:
             while sender.is_alive():

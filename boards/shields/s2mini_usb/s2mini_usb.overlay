@@ -1,6 +1,6 @@
 /*
- * USB OTG (DWC2) dla ESP32-S2. Zephyr ma ten kontroler opisany tylko dla ESP32-S3;
- * S2 ma ten sam blok pod tym samym adresem. Wartości GHWCFG i FIFO jak dla S3.
+ * USB OTG (DWC2) for the ESP32-S2. Zephyr describes this controller only for the ESP32-S3;
+ * the S2 has the same block at the same address. GHWCFG and FIFO values as for the S3.
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <zephyr/dt-bindings/clock/esp32s2_clock.h>

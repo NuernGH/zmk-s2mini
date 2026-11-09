@@ -1,7 +1,7 @@
-"""Zakładka „Keymapa”: edycja układu klawiszy na żywo przez ZMK Studio (port COM klawiatury).
+"""Keymap tab: live keymap editing through ZMK Studio (the keyboard's COM port).
 
-Układ klawiszy, warstwy i dostępne akcje czyta z klawiatury. Klawisz do przypisania można
-wybrać z listy albo naciskając go (z modyfikatorami) na zwykłej klawiaturze.
+The physical layout, layers and available actions are read from the keyboard. The key to assign
+can be picked from a list or by pressing it (with modifiers) on a normal keyboard.
 """
 
 import math
@@ -33,7 +33,7 @@ SHORT_BEHAVIOR = {
 
 
 class Worker:
-    """Wszystkie rozmowy z klawiaturą w jednym wątku; wyniki wracają do okna przez after()."""
+    """All keyboard communication in one thread; results return to the window via after()."""
 
     def __init__(self, widget):
         self.widget = widget
@@ -48,7 +48,7 @@ class Worker:
             fn, done, fail = self.q.get()
             try:
                 r = fn()
-            except Exception as e:  # noqa: BLE001 — błąd pokazujemy w oknie
+            except Exception as e:  # noqa: BLE001 — the error is shown in the window
                 if fail:
                     self.widget.after(0, fail, e)
                 continue
@@ -59,8 +59,8 @@ class Worker:
 class KeymapPage(ctk.CTkFrame):
     def __init__(self, master, header):
         super().__init__(master, fg_color="transparent")
-        header(self, tr("Keymapa"), tr("Zmiany idą od razu do klawiatury (jak w ZMK Studio). "
-                                      "„Zapisz w klawiaturze” zostawia je na stałe, „Cofnij” wraca do zapisanych."))
+        header(self, tr("Keymap"), tr("Changes go to the keyboard right away (like ZMK Studio). "
+                                      "“Save to keyboard” keeps them, “Discard” returns to the saved keymap."))
         self.studio = None
         self.worker = Worker(self)
         self.keymap = None
@@ -73,23 +73,23 @@ class KeymapPage(ctk.CTkFrame):
 
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", pady=(0, 8))
-        self.connect_btn = ctk.CTkButton(bar, text=tr("Połącz z klawiaturą"), command=self.connect)
+        self.connect_btn = ctk.CTkButton(bar, text=tr("Connect to keyboard"), command=self.connect)
         self.connect_btn.pack(side="left")
-        self.state = ctk.CTkLabel(bar, text=tr("Nie połączono"), text_color=MUTED)
+        self.state = ctk.CTkLabel(bar, text=tr("Not connected"), text_color=MUTED)
         self.state.pack(side="left", padx=12)
-        self.discard_btn = ctk.CTkButton(bar, text=tr("Cofnij zmiany"), fg_color=CARD_HI, width=120,
+        self.discard_btn = ctk.CTkButton(bar, text=tr("Discard changes"), fg_color=CARD_HI, width=120,
                                          command=self.discard, state="disabled")
         self.discard_btn.pack(side="right")
-        self.save_btn = ctk.CTkButton(bar, text=tr("Zapisz w klawiaturze"), width=170, command=self.save,
+        self.save_btn = ctk.CTkButton(bar, text=tr("Save to keyboard"), width=170, command=self.save,
                                       state="disabled")
         self.save_btn.pack(side="right", padx=8)
 
         lbar = ctk.CTkFrame(self, fg_color="transparent")
         lbar.pack(fill="x", pady=(0, 6))
-        ctk.CTkLabel(lbar, text=tr("Warstwa"), text_color=MUTED).pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(lbar, text=tr("Layer"), text_color=MUTED).pack(side="left", padx=(0, 8))
         self.layers = ctk.CTkSegmentedButton(lbar, values=["—"], command=self._pick_layer)
         self.layers.pack(side="left")
-        self.rename_btn = ctk.CTkButton(lbar, text=tr("Zmień nazwę"), width=110, fg_color=CARD_HI,
+        self.rename_btn = ctk.CTkButton(lbar, text=tr("Rename"), width=110, fg_color=CARD_HI,
                                         command=self.rename_layer, state="disabled")
         self.rename_btn.pack(side="left", padx=8)
 
@@ -100,22 +100,22 @@ class KeymapPage(ctk.CTkFrame):
 
         self.editor = ctk.CTkFrame(self, fg_color=CARD, corner_radius=12)
         self.editor.pack(fill="both", expand=True, pady=(10, 0))
-        self.hint = ctk.CTkLabel(self.editor, text=tr("Połącz się z klawiaturą, potem kliknij klawisz na rysunku."),
+        self.hint = ctk.CTkLabel(self.editor, text=tr("Connect to the keyboard, then click a key in the picture."),
                                  text_color=MUTED)
         self.hint.pack(padx=18, pady=18, anchor="w")
 
-    # ---------- połączenie ----------
+    # ---------- connection ----------
     def connect(self):
         if self.studio:
             self._disconnect()
             return
-        self._status(tr("Łączenie…"))
+        self._status(tr("Connecting…"))
         self.connect_btn.configure(state="disabled")
 
         def job():
             port = Z.find_port()
             if not port:
-                raise Z.StudioError(tr("nie widzę portu COM klawiatury (1D50:615E)"))
+                raise Z.StudioError(tr("keyboard COM port not found (1D50:615E)"))
             s = Z.Studio(port)
             s.on_notification = lambda n: self.after(0, self._note, n)
             info = s.device_info()
@@ -125,10 +125,10 @@ class KeymapPage(ctk.CTkFrame):
 
     def _connected(self, r):
         self.studio, port, info, locked = r
-        self.connect_btn.configure(state="normal", text=tr("Rozłącz"))
+        self.connect_btn.configure(state="normal", text=tr("Disconnect"))
         self.device = f"{info['name']} ({port})"
         if locked:
-            self._status(tr("{dev}: zablokowana. Odblokuj na klawiaturze: Fn + \\", dev=self.device), WARN)
+            self._status(tr("{dev}: locked. Unlock on the keyboard: Fn + \\", dev=self.device), WARN)
             self.after(1000, self._poll_unlock)
         else:
             self._load()
@@ -147,7 +147,7 @@ class KeymapPage(ctk.CTkFrame):
             self._set_unsaved(n["unsaved"])
 
     def _load(self):
-        self._status(tr("{dev}: wczytuję układ…", dev=self.device))
+        self._status(tr("{dev}: loading keymap…", dev=self.device))
 
         def job():
             s = self.studio
@@ -159,7 +159,7 @@ class KeymapPage(ctk.CTkFrame):
         self.keymap, layouts, behaviors, unsaved = r
         self.layout = layouts["layouts"][layouts["active"]]["keys"] if layouts["layouts"] else []
         self.behaviors = {b["id"]: b for b in behaviors}
-        self._status(tr("{dev}: połączono", dev=self.device), ACCENT)
+        self._status(tr("{dev}: connected", dev=self.device), ACCENT)
         self.rename_btn.configure(state="normal")
         self._set_unsaved(unsaved)
         self._refresh_layers()
@@ -168,8 +168,8 @@ class KeymapPage(ctk.CTkFrame):
 
     def _failed(self, e):
         self.connect_btn.configure(state="normal")
-        self._status(tr("Błąd: {e}", e=tr(str(e))), WARN)
-        if isinstance(e, Z.StudioError) and "zamknięte" in str(e):
+        self._status(tr("Error: {e}", e=tr(str(e))), WARN)
+        if isinstance(e, Z.StudioError) and "closed" in str(e):
             self._disconnect(keep_status=True)
 
     def _disconnect(self, keep_status=False):
@@ -177,12 +177,12 @@ class KeymapPage(ctk.CTkFrame):
             self.studio.close()
         self.studio = self.keymap = None
         self.sel = None
-        self.connect_btn.configure(text=tr("Połącz z klawiaturą"), state="normal")
+        self.connect_btn.configure(text=tr("Connect to keyboard"), state="normal")
         self.save_btn.configure(state="disabled")
         self.discard_btn.configure(state="disabled")
         self.rename_btn.configure(state="disabled")
         if not keep_status:
-            self._status(tr("Nie połączono"))
+            self._status(tr("Not connected"))
         self.draw()
         self._show_editor()
 
@@ -195,11 +195,11 @@ class KeymapPage(ctk.CTkFrame):
         self.save_btn.configure(state=st)
         self.discard_btn.configure(state=st)
         if self.studio and self.keymap:
-            self._status(tr("{dev}: niezapisane zmiany" if v else "{dev}: zapisane", dev=self.device), WARN if v else ACCENT)
+            self._status(tr("{dev}: unsaved changes" if v else "{dev}: zapisane", dev=self.device), WARN if v else ACCENT)
 
-    # ---------- warstwy ----------
+    # ---------- layers ----------
     def _layer_names(self):
-        return [l["name"] or tr("Warstwa {i}", i=i) for i, l in enumerate(self.keymap["layers"])]
+        return [l["name"] or tr("Layer {i}", i=i) for i, l in enumerate(self.keymap["layers"])]
 
     def _refresh_layers(self):
         names = self._layer_names()
@@ -214,7 +214,7 @@ class KeymapPage(ctk.CTkFrame):
 
     def rename_layer(self):
         layer = self.keymap["layers"][self.layer_idx]
-        d = ctk.CTkInputDialog(text=tr("Nowa nazwa (do {n} znaków):", n=self.keymap["max_name"] or 20), title=tr("Nazwa warstwy"))
+        d = ctk.CTkInputDialog(text=tr("New name (up to {n} characters):", n=self.keymap["max_name"] or 20), title=tr("Layer name"))
         name = (d.get_input() or "").strip()
         if not name:
             return
@@ -231,9 +231,9 @@ class KeymapPage(ctk.CTkFrame):
 
         self.worker.submit(job, done, self._failed)
 
-    # ---------- rysunek ----------
+    # ---------- drawing ----------
     def _geometry(self):
-        """Prostokąty klawiszy w pikselach płótna (z obrotem)."""
+        """Key rectangles in canvas pixels (with rotation)."""
         keys = self.layout or []
         if not keys:
             return [], 1
@@ -261,7 +261,7 @@ class KeymapPage(ctk.CTkFrame):
         c = self.canvas
         c.delete("all")
         if not self.keymap or not self.layout:
-            c.create_text(c.winfo_width() / 2, 120, text=tr("Brak połączenia z klawiaturą"), fill=MUTED,
+            c.create_text(c.winfo_width() / 2, 120, text=tr("Keyboard not connected"), fill=MUTED,
                           font=("Segoe UI", 12))
             return
         polys, scale = self._geometry()
@@ -333,16 +333,16 @@ class KeymapPage(ctk.CTkFrame):
                 self._show_editor()
                 return
 
-    # ---------- edytor klawisza ----------
+    # ---------- key editor ----------
     def _show_editor(self):
         for w in self.editor.winfo_children():
             w.destroy()
         if not self.keymap:
-            ctk.CTkLabel(self.editor, text=tr("Połącz się z klawiaturą, potem kliknij klawisz na rysunku."),
+            ctk.CTkLabel(self.editor, text=tr("Connect to the keyboard, then click a key in the picture."),
                          text_color=MUTED).pack(padx=18, pady=18, anchor="w")
             return
         if self.sel is None:
-            ctk.CTkLabel(self.editor, text=tr("Kliknij klawisz na rysunku, żeby zmienić jego działanie na tej warstwie."),
+            ctk.CTkLabel(self.editor, text=tr("Click a key in the picture to change what it does on this layer."),
                          text_color=MUTED).pack(padx=18, pady=18, anchor="w")
             return
         b = self.keymap["layers"][self.layer_idx]["bindings"][self.sel]
@@ -394,7 +394,7 @@ def _inside(x, y, poly):
 
 
 class BindingEditor(ctk.CTkFrame):
-    """Wybór akcji i jej parametrów dla jednego klawisza."""
+    """Choosing the action and its parameters for one key."""
 
     def __init__(self, master, page, binding):
         super().__init__(master, fg_color="transparent")
@@ -406,12 +406,12 @@ class BindingEditor(ctk.CTkFrame):
 
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(fill="x")
-        ctk.CTkLabel(top, text=tr("Klawisz {n}", n=page.sel + 1), font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
-        ctk.CTkLabel(top, text=tr("Akcja"), text_color=MUTED).pack(side="left", padx=(18, 6))
+        ctk.CTkLabel(top, text=tr("Key {n}", n=page.sel + 1), font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
+        ctk.CTkLabel(top, text=tr("Action"), text_color=MUTED).pack(side="left", padx=(18, 6))
         self.beh = ctk.CTkOptionMenu(top, values=self.names, command=self._beh_changed, width=200)
         self.beh.set(beh.get(self.bid, {}).get("name", self.names[0]))
         self.beh.pack(side="left")
-        ctk.CTkButton(top, text=tr("⌨  Naciśnij klawisz…"), width=160, command=self._capture).pack(side="right")
+        ctk.CTkButton(top, text=tr("⌨  Press a key…"), width=160, command=self._capture).pack(side="right")
         self.params = ctk.CTkFrame(self, fg_color="transparent")
         self.params.pack(fill="both", expand=True, pady=(10, 0))
         self._build_params()
@@ -436,7 +436,7 @@ class BindingEditor(ctk.CTkFrame):
         return any(any(d["type"] != "nil" for d in s["param1"] + s["param2"]) for s in b["metadata"])
 
     def _param_sets(self, b):
-        """Opisy param1 oraz param2 pasujące do wybranego param1."""
+        """param1 descriptions, and param2 descriptions matching the chosen param1."""
         p1 = [d for s in b["metadata"] for d in s["param1"]]
         p2 = []
         for s in b["metadata"]:
@@ -454,20 +454,20 @@ class BindingEditor(ctk.CTkFrame):
             descs = [d for d in descs if d["type"] != "nil"]
             if not descs:
                 continue
-            label = tr("Klawisz") if any(d["type"] == "hid" for d in descs) else (tr("Warstwa") if any(
-                d["type"] == "layer" for d in descs) else tr("Wartość"))
-            if label == tr("Wartość") and len(descs) == 1 and descs[0]["name"]:
+            label = tr("Key") if any(d["type"] == "hid" for d in descs) else (tr("Layer") if any(
+                d["type"] == "layer" for d in descs) else tr("Value"))
+            if label == tr("Value") and len(descs) == 1 and descs[0]["name"]:
                 label = descs[0]["name"]
             if b["name"] == "Mod-Tap" and idx == 1:
-                label = tr("Przytrzymanie")
+                label = tr("Hold")
             if b["name"] in ("Mod-Tap", "Layer-Tap") and idx == 2:
-                label = tr("Stuknięcie")
+                label = tr("Tap")
             ctk.CTkLabel(self.params, text=label, text_color=MUTED).grid(row=row, column=0, sticky="w", padx=(0, 10),
                                                                          pady=4)
             self._param_widget(idx, descs).grid(row=row, column=1, sticky="w", pady=4)
             row += 1
         if row == 0:
-            ctk.CTkLabel(self.params, text=tr("Ta akcja nie ma ustawień."), text_color=MUTED).grid(row=0, column=0,
+            ctk.CTkLabel(self.params, text=tr("This action has no settings."), text_color=MUTED).grid(row=0, column=0,
                                                                                             sticky="w")
 
     def _value(self, idx):
@@ -490,9 +490,9 @@ class BindingEditor(ctk.CTkFrame):
             f = ctk.CTkFrame(self.params, fg_color="transparent")
             ctk.CTkLabel(f, text=K.label(val, long=True) if val else "—", width=220, anchor="w",
                          font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
-            ctk.CTkButton(f, text=tr("Z listy…"), width=90, fg_color=CARD_HI,
+            ctk.CTkButton(f, text=tr("From list…"), width=90, fg_color=CARD_HI,
                           command=lambda: KeyList(self, lambda v: self._set(idx, v))).pack(side="left", padx=6)
-            ctk.CTkButton(f, text=tr("Naciśnij…"), width=90, fg_color=CARD_HI,
+            ctk.CTkButton(f, text=tr("Press…"), width=90, fg_color=CARD_HI,
                           command=lambda: KeyCapture(self, lambda v: self._set(idx, v))).pack(side="left")
             return f
         if "layer" in types:
@@ -571,21 +571,21 @@ def _dedupe(descs):
 
 
 class KeyCapture(ctk.CTkToplevel):
-    """Okienko: naciśnij klawisz (z Ctrl/Shift/Alt/AltGr/Win) — wynik to wartość &kp."""
+    """Dialog: press a key (with Ctrl/Shift/Alt/AltGr/Win); the result is a &kp value."""
 
     def __init__(self, master, on_pick):
         super().__init__(master)
         self.on_pick = on_pick
-        self.title(tr("Naciśnij klawisz"))
+        self.title(tr("Press a key"))
         self.geometry("420x170")
         self.resizable(False, False)
         self.attributes("-topmost", True)
         self.held = {}
-        ctk.CTkLabel(self, text="Naciśnij klawisz albo skrót (np. Ctrl+C).\nSam modyfikator: naciśnij i puść.",
+        ctk.CTkLabel(self, text=tr("Press a key or a shortcut (e.g. Ctrl+C).\nModifier alone: press and release."),
                      justify="center").pack(pady=(18, 6))
         self.show = ctk.CTkLabel(self, text="…", font=ctk.CTkFont(size=20, weight="bold"))
         self.show.pack(pady=4)
-        ctk.CTkButton(self, text=tr("Anuluj"), width=90, fg_color=CARD_HI, command=self.destroy).pack(pady=6)
+        ctk.CTkButton(self, text=tr("Cancel"), width=90, fg_color=CARD_HI, command=self.destroy).pack(pady=6)
         self.bind("<KeyPress>", self._down)
         self.bind("<KeyRelease>", self._up)
         self.after(80, self._focus)
@@ -599,7 +599,7 @@ class KeyCapture(ctk.CTkToplevel):
         bits = 0
         for _, (bit, _id) in self.held.items():
             bits |= bit
-        # AltGr w Windows = lewy Ctrl + prawy Alt: lewy Ctrl jest fałszywy
+        # AltGr on Windows = left Ctrl + right Alt: the left Ctrl is fake
         if bits & 0x40:
             bits &= ~0x01
         return bits
@@ -614,7 +614,7 @@ class KeyCapture(ctk.CTkToplevel):
         if e.keysym in ("KP_Enter",):
             key = K.BY_ID["KP_ENTER"]
         if not key:
-            self.show.configure(text=tr("nieznany klawisz ({k})", k=e.keysym))
+            self.show.configure(text=tr("unknown key ({k})", k=e.keysym))
             return "break"
         self._done(K.encode(key, self._mods()))
         return "break"
@@ -636,23 +636,23 @@ class KeyCapture(ctk.CTkToplevel):
 
 
 class KeyList(ctk.CTkToplevel):
-    """Lista klawiszy z wyszukiwaniem i modyfikatorami."""
+    """Key list with search and modifiers."""
 
     def __init__(self, master, on_pick):
         super().__init__(master)
         self.on_pick = on_pick
-        self.title(tr("Wybierz klawisz"))
+        self.title(tr("Choose a key"))
         self.geometry("520x560")
         self.attributes("-topmost", True)
         self.after(80, self.grab_set)
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(fill="x", padx=12, pady=(12, 4))
-        self.q = ctk.CTkEntry(top, placeholder_text=tr("Szukaj…"))
+        self.q = ctk.CTkEntry(top, placeholder_text=tr("Search…"))
         self.q.pack(fill="x")
         self.q.bind("<KeyRelease>", lambda e: self.fill())
         mods = ctk.CTkFrame(self, fg_color="transparent")
         mods.pack(fill="x", padx=12, pady=4)
-        ctk.CTkLabel(mods, text=tr("Z:"), text_color=MUTED).pack(side="left")
+        ctk.CTkLabel(mods, text=tr("With:"), text_color=MUTED).pack(side="left")
         self.mod_vars = []
         for _, name, bit in K.MODS:
             v = tk.IntVar(value=0)

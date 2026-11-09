@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #pragma once
 
-/* Parametr &scr_view: poprzedni / następny widok ekranu */
+/* &scr_view parameter: previous / next screen view */
 #define SCR_PREV 0
 #define SCR_NEXT 1

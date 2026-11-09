@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-description: Przełącza widok ekranu (SCR_PREV / SCR_NEXT z dt-bindings/zmk/s2mini.h).
+description: Switches the screen view (SCR_PREV / SCR_NEXT from dt-bindings/zmk/s2mini.h).
 
 compatible: "zmk,behavior-screen-view"
 

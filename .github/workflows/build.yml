@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Narzędzia systemowe
+      - name: System tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build device-tree-compiler protobuf-compiler
 
       - name: Cache Zephyr SDK
@@ -43,7 +43,7 @@ jobs:
           tar xf toolchain_gnu_linux-x86_64_xtensa-espressif_esp32s2_zephyr-elf.tar.xz -C "$SDK_DIR/gnu"
           rm -f ./*.tar.xz
 
-      - name: Cache modułów west
+      - name: Cache west modules
         uses: actions/cache@v4
         with:
           path: |
@@ -65,7 +65,7 @@ jobs:
           pip install -q -r zephyr/scripts/requirements-base.txt
           pip install -q "esptool>=5.0.2" protobuf
 
-      - name: Budowanie
+      - name: Build
         env:
           ZEPHYR_SDK_INSTALL_DIR: ${{ env.SDK_DIR }}
         run: ws/zmk-s2mini/scripts/build.sh ws

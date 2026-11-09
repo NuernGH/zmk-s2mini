@@ -1,2 +1,0 @@
-config SHIELD_S2MINI_ZMK_TEST
-    def_bool $(shields_list_contains,s2mini_zmk_test)

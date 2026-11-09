@@ -1,30 +1,30 @@
 /*
- * Raw HID: drugi interfejs HID (strona 0xFF60, raporty 32 B) do odbioru danych z PC:
- * obciążenie i temperatura CPU/GPU, głośność, godzina. Dane czyta ekran (status.h).
+ * Raw HID: a second HID interface (usage page 0xFF60, 32 B reports) that receives data from the PC:
+ * CPU/GPU load and temperature, volume, time of day. The screen reads it (status.h).
  *
- * Ramka z PC (raport wyjściowy, 32 B, bez ID raportu):
- *   [0] 0x53 ('S')  [1] 0x01 (wersja)  [2] flagi S2MINI_PC_*
- *   [3] CPU %  [4] CPU °C  [5] GPU %  [6] GPU °C  [7] głośność %
- *   [8] godzina  [9] minuta  [10] sekunda  [11] iGPU % (flaga S2MINI_PC_IGPU)
- *   [12..13] sieć pobieranie KB/s  [14..15] wysyłanie KB/s (LE, flaga S2MINI_PC_NET)   reszta = 0
+ * Frame from the PC (output report, 32 B, no report ID):
+ *   [0] 0x53 ('S')  [1] 0x01 (version)  [2] flags S2MINI_PC_*
+ *   [3] CPU %  [4] CPU °C  [5] GPU %  [6] GPU °C  [7] volume %
+ *   [8] hour  [9] minute  [10] second  [11] iGPU % (flag S2MINI_PC_IGPU)
+ *   [12..13] network download KB/s  [14..15] upload KB/s (LE, flag S2MINI_PC_NET)   rest = 0
  *
- * Ramka z listą portów COM (jedna ramka na port, wysyłane po kolei):
- *   [0] 0x53  [1] 0x02  [2] numer portu (od 0)  [3] liczba portów
- *   [4..31] tekst, np. "COM12 S2 mini 60" (do 28 znaków, reszta 0)
- *   Przy 0 portach jedna ramka z [3] = 0.
+ * COM port list frame (one frame per port, sent in order):
+ *   [0] 0x53  [1] 0x02  [2] port number (from 0)  [3] number of ports
+ *   [4..31] text, e.g. "COM12 S2 mini 60" (up to 28 characters, rest 0)
+ *   With 0 ports, a single frame with [3] = 0.
  *
- * Ramka „co gra” (dwie ramki: tytuł, potem wykonawca):
- *   [0] 0x53  [1] 0x03  [2] stan (0 nic, 1 gra, 2 pauza)  [3] pole (0 tytuł, 1 wykonawca)
- *   [4..31] tekst ASCII (do 28 znaków, reszta 0)
+ * "Now playing" frame (two frames: title, then artist):
+ *   [0] 0x53  [1] 0x03  [2] state (0 nothing, 1 playing, 2 paused)  [3] field (0 title, 1 artist)
+ *   [4..31] ASCII text (up to 28 characters, rest 0)
  *
- * Ramka powiadomienia (trzy ramki: aplikacja, tytuł, treść; pokazane po ramce treści):
- *   [0] 0x53  [1] 0x04  [2] numer powiadomienia  [3] pole (0 aplikacja, 1 tytuł, 2 treść)
- *   [4..31] tekst ASCII
+ * Notification frame (three frames: app, title, body; shown after the body frame):
+ *   [0] 0x53  [1] 0x04  [2] notification number  [3] field (0 app, 1 title, 2 body)
+ *   [4..31] ASCII text
  *
- * Szybki start: nazwa [1] 0x05 [2] indeks [3] liczba aplikacji [4..31] nazwa ASCII,
- *   ikona [1] 0x06 [2] indeks [3] kawałek 0..4 [4..31] do 28 B z 128 B ikony 32×32 1 bpp.
- *   Liczba 0 = pusta lista.
- * Do PC (raport wejściowy): [0] 0x53 [1] 0x10 [2] indeks aplikacji do uruchomienia.
+ * Quick launch: name [1] 0x05 [2] index [3] number of apps [4..31] ASCII name,
+ *   icon [1] 0x06 [2] index [3] chunk 0..4 [4..31] up to 28 B of the 128 B 32×32 1 bpp icon.
+ *   Count 0 = empty list.
+ * To the PC (input report): [0] 0x53 [1] 0x10 [2] index of the app to launch.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -57,13 +57,13 @@ static const uint8_t raw_hid_desc[] = {
     0x06, 0x60, 0xFF,       /* Usage Page (Vendor 0xFF60) */
     0x09, 0x61,             /* Usage (0x61) */
     0xA1, 0x01,             /* Collection (Application) */
-    0x09, 0x62,             /*   Usage (0x62): dane do PC */
+    0x09, 0x62,             /*   Usage (0x62): data to the PC */
     0x15, 0x00,             /*   Logical Minimum (0) */
     0x26, 0xFF, 0x00,       /*   Logical Maximum (255) */
     0x95, RAW_HID_REPORT_SIZE, /* Report Count */
     0x75, 0x08,             /*   Report Size (8) */
     0x81, 0x02,             /*   Input (Data, Var, Abs) */
-    0x09, 0x63,             /*   Usage (0x63): dane z PC */
+    0x09, 0x63,             /*   Usage (0x63): data from the PC */
     0x15, 0x00,             /*   Logical Minimum (0) */
     0x26, 0xFF, 0x00,       /*   Logical Maximum (255) */
     0x95, RAW_HID_REPORT_SIZE, /* Report Count */
@@ -89,7 +89,7 @@ bool s2mini_pc_data_get(struct s2mini_pc_data *out, int64_t *age_ms) {
     return ok;
 }
 
-/* Porty COM: lista zbierana z kolejnych ramek, zatwierdzana po ostatniej. */
+/* COM ports: list collected from consecutive frames, committed after the last one. */
 static char ports[S2MINI_PORTS_MAX][S2MINI_PORT_TEXT];
 static int ports_count = -1;
 static int64_t ports_at;
@@ -138,7 +138,7 @@ static void parse_ports(const uint8_t *buf, uint16_t len) {
     K_SPINLOCK(&lock) {
         bool added = false;
         for (int i = 0; i < MIN(count, S2MINI_PORTS_MAX); i++) {
-            /* Nowy port (nie przy pierwszej liście po starcie) pokazuje ekran portów. */
+            /* A new port (not in the first list after boot) shows the ports view. */
             if (ports_count >= 0 && !known_port(pending[i])) {
                 added = true;
             }
@@ -152,7 +152,7 @@ static void parse_ports(const uint8_t *buf, uint16_t len) {
     }
 }
 
-/* Co gra: tytuł i wykonawca w osobnych ramkach, zatwierdzane po ramce wykonawcy. */
+/* Now playing: title and artist in separate frames, committed after the artist frame. */
 static struct s2mini_media media;
 static int64_t media_at;
 static bool have_media;
@@ -189,7 +189,7 @@ static void parse_media(const uint8_t *buf, uint16_t len) {
     K_SPINLOCK(&lock) {
         int64_t now = k_uptime_get();
         bool new_title = strcmp(media.title, pending_title) != 0 && pending_title[0] != '\0';
-        /* Pierwsza ramka po starcie nie pokazuje okienka. */
+        /* The first frame after boot does not show a popup. */
         if (new_title && have_media) {
             media.changed_at = now;
         }
@@ -226,7 +226,7 @@ static void parse_notif(const uint8_t *buf, uint16_t len) {
     }
 }
 
-/* Szybki start: nazwy i ikony aplikacji. */
+/* Quick launch: app names and icons. */
 static char app_names[S2MINI_APPS_MAX][S2MINI_APP_NAME];
 static uint8_t app_icons[S2MINI_APPS_MAX][S2MINI_ICON_BYTES];
 static int apps_count = -1;
@@ -402,7 +402,7 @@ static int s2mini_raw_hid_init(void) {
     return err;
 }
 
-/* Musi się zarejestrować przed usbd_init() w ZMK (ZMK_USB_INIT_PRIORITY). */
+/* Must register before usbd_init() in ZMK (ZMK_USB_INIT_PRIORITY). */
 BUILD_ASSERT(CONFIG_S2MINI_RAW_HID_INIT_PRIORITY < CONFIG_ZMK_USB_INIT_PRIORITY,
-             "Raw HID musi wystartować przed USB");
+             "Raw HID must start before USB");
 SYS_INIT(s2mini_raw_hid_init, APPLICATION, CONFIG_S2MINI_RAW_HID_INIT_PRIORITY);

@@ -1,13 +1,13 @@
 /*
- * Minutnik i ustawienia ekranu sterowane gałką.
+ * Timer and screen settings controlled by the knob.
  *
- * Widok TIMER: obrót ustawia czas (do 5 min co 15 s, do 1 h co minutę, do 3 h co 5 min) (gdy minutnik stoi), PUSH = start / pauza.
- * Widok SETTINGS: obrót wybiera pozycję, PUSH wchodzi w zmianę wartości (obrót zmienia),
- * kolejne PUSH zatwierdza i zapisuje w pamięci płytki.
- * Gdy minutnik dobiegnie końca, ekran miga „TIME UP” do PUSH albo przez 30 s.
+ * TIMER view: turning sets the time (15 s steps up to 5 min, 1 min up to 1 h, 5 min up to 3 h) while stopped; PUSH = start / pause.
+ * SETTINGS view: turning picks an item, PUSH enters value editing (turning changes it),
+ * the next PUSH confirms and saves it to the board's flash.
+ * When the timer runs out, the screen flashes "TIME UP" until PUSH or for 30 s.
  *
- * Stan zmieniają zachowania (kolejka systemowa), a czyta wątek ekranu, więc wszystko
- * idzie przez spinlock.
+ * State is changed by behaviors (system work queue) and read by the display thread, so everything
+ * goes through a spinlock.
  * SPDX-License-Identifier: MIT
  */
 
@@ -37,10 +37,10 @@ static struct s2mini_ui_settings cfg = {
 
 static struct {
     enum s2mini_timer_state state;
-    int seconds; /* ustawiony czas */
-    int64_t end_at;    /* RUNNING: kiedy koniec */
+    int seconds; /* set time */
+    int64_t end_at;    /* RUNNING: when it ends */
     int remaining_ms;  /* PAUSED */
-    int64_t done_at;   /* DONE: kiedy minął czas */
+    int64_t done_at;   /* DONE: when the time ran out */
 } tmr = {.state = S2MINI_TIMER_IDLE, .seconds = TIMER_DEFAULT_S};
 
 static int menu_sel;
@@ -52,7 +52,7 @@ int s2mini_launcher_selected(void) {
 }
 static bool menu_edit;
 
-/* Wołane pod blokadą: RUNNING → DONE po czasie, DONE → IDLE po DONE_SHOW_MS. */
+/* Called with the lock held: RUNNING → DONE when time is up, DONE → IDLE after DONE_SHOW_MS. */
 static void timer_refresh_locked(int64_t now) {
     if (tmr.state == S2MINI_TIMER_RUNNING && now >= tmr.end_at) {
         tmr.state = S2MINI_TIMER_DONE;
@@ -110,14 +110,14 @@ bool s2mini_ui_push_captured(void) { return s2mini_ui_knob_captured() || timer_d
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 /*
- * Jeden krok gałki minutnika: do 5 min co 15 s, do godziny co minutę, dalej co 5 min.
- * Krok w dół liczy się od strony niższego zakresu, żeby wracać po tych samych wartościach.
+ * One timer knob step: 15 s up to 5 min, 1 min up to an hour, then 5 min.
+ * A step down uses the lower range's step, so turning back passes the same values.
  */
 static int timer_step(int sec, int dir) {
     int probe = dir > 0 ? sec : sec - 1;
     int step = probe < 5 * 60 ? 15 : (probe < 3600 ? 60 : 300);
     int next = dir > 0 ? sec + step : sec - step;
-    /* wyrównanie do siatki kroku */
+    /* align to the step grid */
     next = dir > 0 ? next - next % step : ((next + step - 1) / step) * step;
     return clampi(next, TIMER_MIN_S, TIMER_MAX_S);
 }
@@ -147,7 +147,7 @@ static void settings_store(void) {
     s2mini_ui_settings_get(&copy);
     int err = settings_save_one("s2mini/ui", &copy, sizeof(copy));
     if (err) {
-        LOG_WRN("s2mini: zapis ustawień ekranu nie wyszedł (%d)", err);
+        LOG_WRN("s2mini: saving screen settings failed (%d)", err);
     }
 #endif
 }
@@ -159,9 +159,9 @@ void s2mini_ui_knob(int delta) {
     timer_refresh_locked(now);
 
     if (view == S2MINI_VIEW_TIMER) {
-        /* Czas da się zmienić, gdy minutnik stoi (zmiana w pauzie zaczyna od nowa). */
+        /* The time can be changed while the timer is stopped (a change while paused starts over). */
         if (tmr.state != S2MINI_TIMER_RUNNING) {
-            /* Przyspieszanie: szybkie kroki w tę samą stronę (co < 150 ms) mnożą skok, do ×8. */
+            /* Acceleration: fast steps in the same direction (< 150 ms apart) multiply the step, up to ×8. */
             static int64_t last_at;
             static int last_dir, streak;
             int dir = delta > 0 ? 1 : -1;
@@ -202,7 +202,7 @@ void s2mini_ui_push(void) {
 
     bool was_done = tmr.state == S2MINI_TIMER_DONE;
     if (was_done) {
-        /* PUSH gasi dzwonek minutnika, niezależnie od widoku. */
+        /* PUSH silences the timer alarm, whatever the view. */
         tmr.state = S2MINI_TIMER_IDLE;
     } else if (view == S2MINI_VIEW_TIMER) {
         switch (tmr.state) {
@@ -225,7 +225,7 @@ void s2mini_ui_push(void) {
         if (menu_edit) {
             store = true;
         }
-        /* Przełączniki (wł./wył.) zmieniają się od razu przy PUSH, jasność wymaga obrotu. */
+        /* Toggles (on/off) change immediately on PUSH; brightness needs turning. */
         if (!menu_edit && menu_sel != S2MINI_SET_BRIGHTNESS) {
             setting_change_locked(menu_sel, 1);
             store = true;

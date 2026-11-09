@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-description: Przełącza gałkę na następny tryb (zob. zmk,behavior-knob-modes).
+description: Switches the knob to the next mode (see zmk,behavior-knob-modes).
 
 compatible: "zmk,behavior-knob-next"
 

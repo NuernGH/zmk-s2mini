@@ -1,5 +1,5 @@
 /*
- * Wspólny stan dla ekranu: tryb gałki i dane z PC (Raw HID).
+ * Shared state for the screen: knob mode and data from the PC (Raw HID).
  * SPDX-License-Identifier: MIT
  */
 #pragma once
@@ -7,21 +7,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Tryby gałki (CONFIG_S2MINI_KNOB_MODES). */
+/* Knob modes (CONFIG_S2MINI_KNOB_MODES). */
 int s2mini_knob_mode_count(void);
 int s2mini_knob_mode_index(void);
 const char *s2mini_knob_mode_name(int index);
-/* Czas ostatniej zmiany trybu (k_uptime_get), 0 = jeszcze nie zmieniany. */
+/* Time of the last mode change (k_uptime_get), 0 = never changed. */
 int64_t s2mini_knob_mode_changed_at(void);
 
-/* Dane z PC (CONFIG_S2MINI_RAW_HID). */
+/* Data from the PC (CONFIG_S2MINI_RAW_HID). */
 #define S2MINI_PC_CPU BIT(0)
 #define S2MINI_PC_GPU BIT(1)
 #define S2MINI_PC_VOLUME BIT(2)
 #define S2MINI_PC_TIME BIT(3)
 #define S2MINI_PC_MUTED BIT(4)
-#define S2MINI_PC_IGPU BIT(5) /* zintegrowane GPU (Intel), tylko obciążenie */
-#define S2MINI_PC_NET BIT(6)  /* prędkość sieci */
+#define S2MINI_PC_IGPU BIT(5) /* integrated GPU (Intel), load only */
+#define S2MINI_PC_NET BIT(6)  /* network speed */
 
 struct s2mini_pc_data {
     uint8_t flags;
@@ -38,52 +38,52 @@ struct s2mini_pc_data {
     uint16_t net_up;   /* KB/s */
 };
 
-/* Porty COM z PC (ramka 0x02). */
+/* COM ports from the PC (frame 0x02). */
 #define S2MINI_PORTS_MAX 8
 #define S2MINI_PORT_TEXT 28
 
 /*
- * Kopiuje listę portów do out (max pozycji), zwraca liczbę portów (może być większa niż max)
- * albo -1, gdy lista jeszcze nie przyszła. added_at = czas, gdy pojawił się nowy port (0 = nigdy).
+ * Copies the port list to out (up to max entries), returns the number of ports (may exceed max)
+ * or -1 if no list has arrived yet. added_at = when a new port appeared (0 = never).
  */
 int s2mini_ports_get(char out[][S2MINI_PORT_TEXT], int max, int64_t *age_ms, int64_t *added_at);
 
-/* Co gra na PC (ramka 0x03). Tekst tylko ASCII (program PC zamienia polskie litery). */
+/* Now playing on the PC (frame 0x03). ASCII text only (the PC app transliterates). */
 #define S2MINI_MEDIA_TEXT 29
 enum s2mini_media_status { S2MINI_MEDIA_NONE, S2MINI_MEDIA_PLAYING, S2MINI_MEDIA_PAUSED };
 struct s2mini_media {
     uint8_t status;
     char title[S2MINI_MEDIA_TEXT];
     char artist[S2MINI_MEDIA_TEXT];
-    int64_t changed_at; /* kiedy zmienił się tytuł (0 = nigdy) */
+    int64_t changed_at; /* when the title changed (0 = never) */
 };
-/* Zwraca false, gdy nic jeszcze nie przyszło. age_ms = wiek danych. */
+/* Returns false if nothing has arrived yet. age_ms = age of the data. */
 bool s2mini_media_get(struct s2mini_media *out, int64_t *age_ms);
 
-/* Ostatnie powiadomienie Windows (ramka 0x04): aplikacja, tytuł, treść (ASCII). */
+/* Last Windows notification (frame 0x04): app, title, body (ASCII). */
 struct s2mini_notif {
     char app[S2MINI_MEDIA_TEXT];
     char title[S2MINI_MEDIA_TEXT];
     char body[S2MINI_MEDIA_TEXT];
-    int64_t at; /* kiedy przyszło (0 = nigdy) */
+    int64_t at; /* when it arrived (0 = never) */
 };
 void s2mini_notif_get(struct s2mini_notif *out);
 
 /*
- * Szybki start (ramki 0x05 nazwa, 0x06 ikona): lista aplikacji z programu PC.
- * Ikona 32×32, 1 bit na piksel, wiersz = 4 bajty, bit 7 = lewy piksel, 1 = świeci.
+ * Quick launch (frames 0x05 name, 0x06 icon): app list from the PC app.
+ * Icon 32×32, 1 bit per pixel, row = 4 bytes, bit 7 = left pixel, 1 = lit.
  */
 #define S2MINI_APPS_MAX 16
 #define S2MINI_ICON_SIZE 32
 #define S2MINI_ICON_BYTES (S2MINI_ICON_SIZE * S2MINI_ICON_SIZE / 8)
 #define S2MINI_APP_NAME 29
-int s2mini_apps_count(void);                 /* -1 = lista jeszcze nie przyszła */
-uint32_t s2mini_apps_version(void);          /* zmienia się przy każdej zmianie listy/ikon */
+int s2mini_apps_count(void);                 /* -1 = list not received yet */
+uint32_t s2mini_apps_version(void);          /* changes whenever the list/icons change */
 bool s2mini_app_get(int index, char name[S2MINI_APP_NAME], uint8_t icon[S2MINI_ICON_BYTES]);
-int s2mini_app_launch(int index);            /* wysyła do PC prośbę o uruchomienie */
+int s2mini_app_launch(int index);            /* asks the PC to launch the app */
 int s2mini_launcher_selected(void);
 
-/* Widok ekranu wybierany przez &scr_view (CON / BAK). */
+/* Screen view selected with &scr_view (CON / BAK). */
 enum s2mini_view {
     S2MINI_VIEW_MAIN,
     S2MINI_VIEW_MEDIA,
@@ -96,23 +96,23 @@ enum s2mini_view {
 int s2mini_screen_view(void);
 void s2mini_screen_view_step(int delta);
 
-/* Ostatnie dane z PC. Zwraca false, gdy jeszcze nic nie przyszło. age_ms = wiek danych. */
-/* Szybkość pisania (słowa/min) liczona z samych zwykłych klawiszy, średnia z 10 s. */
+/* Last data from the PC. Returns false if nothing has arrived yet. age_ms = age of the data. */
+/* Typing speed (words/min) counted from ordinary keys only, averaged over 10 s. */
 int s2mini_wpm_get(void);
 
 bool s2mini_pc_data_get(struct s2mini_pc_data *out, int64_t *age_ms);
 
 /*
- * Minutnik i ustawienia ekranu (src/ui_state.c). Na widokach TIMER i SETTINGS gałka steruje
- * ekranem zamiast trybu (głośność itd.), a krótkie PUSH zatwierdza.
+ * Timer and screen settings (src/ui_state.c). On the TIMER and SETTINGS views the knob controls
+ * the screen instead of its mode (volume etc.), and a short PUSH confirms.
  */
 enum s2mini_timer_state { S2MINI_TIMER_IDLE, S2MINI_TIMER_RUNNING, S2MINI_TIMER_PAUSED, S2MINI_TIMER_DONE };
 
 struct s2mini_timer {
     enum s2mini_timer_state state;
-    int seconds;      /* ustawiony czas */
-    int remaining_ms; /* pozostało (RUNNING / PAUSED) */
-    int done_ms;      /* od ilu ms minął czas (DONE) */
+    int seconds;      /* set time */
+    int remaining_ms; /* time left (RUNNING / PAUSED) */
+    int done_ms;      /* ms since the time ran out (DONE) */
 };
 
 enum s2mini_setting { S2MINI_SET_BRIGHTNESS, S2MINI_SET_INVERT, S2MINI_SET_CLOCK, S2MINI_SET_WPM, S2MINI_SET_COUNT };
@@ -128,10 +128,10 @@ struct s2mini_ui_settings {
 
 void s2mini_timer_get(struct s2mini_timer *out);
 void s2mini_ui_settings_get(struct s2mini_ui_settings *out);
-/* Zaznaczona pozycja menu ustawień i czy jest w trybie zmiany wartości. */
+/* Selected settings menu item and whether it is in value-edit mode. */
 void s2mini_settings_menu_get(int *selected, bool *editing);
 
-/* Czy gałka / PUSH sterują teraz ekranem (widok TIMER albo SETTINGS, albo dzwoni minutnik). */
+/* Whether the knob / PUSH currently control the screen (TIMER or SETTINGS view, or the timer is ringing). */
 bool s2mini_ui_knob_captured(void);
 bool s2mini_ui_push_captured(void);
 void s2mini_ui_knob(int delta);

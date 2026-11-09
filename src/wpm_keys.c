@@ -1,8 +1,8 @@
 /*
- * Licznik WPM do ekranu. Liczy tylko zwykłe klawisze (litery, cyfry, spacja, interpunkcja,
- * Enter, Backspace, Tab), a nie kroki pokrętła (głośność, przewijanie) ani modyfikatory,
- * które wbudowany licznik ZMK też nabijał.
- * Średnia z ostatnich 10 s; 5 znaków = 1 słowo.
+ * WPM counter for the screen. Counts only ordinary keys (letters, digits, space, punctuation,
+ * Enter, Backspace, Tab), not knob steps (volume, scrolling) or modifiers,
+ * which ZMK's built-in counter also counted.
+ * Average over the last 10 s; 5 characters = 1 word.
  * SPDX-License-Identifier: MIT
  */
 
@@ -14,7 +14,7 @@
 
 #include <s2mini/status.h>
 
-#define BUCKETS 10 /* sekund */
+#define BUCKETS 10 /* seconds */
 #define KEY_FIRST 0x04 /* A */
 #define KEY_LAST 0x38  /* / */
 
@@ -22,7 +22,7 @@ static struct k_spinlock lock;
 static uint16_t counts[BUCKETS];
 static int64_t last_sec = -1;
 
-/* Pod blokadą: zeruje kubełki sekund, które minęły od ostatniego wywołania. */
+/* With the lock held: clears the one-second buckets that elapsed since the last call. */
 static void advance_locked(int64_t sec) {
     if (last_sec < 0 || sec - last_sec >= BUCKETS) {
         memset(counts, 0, sizeof(counts));
@@ -43,7 +43,7 @@ int s2mini_wpm_get(void) {
             sum += counts[i];
         }
     }
-    /* znaki w 10 s × 6 = znaki/min, / 5 = słowa/min */
+    /* characters in 10 s × 6 = characters/min, / 5 = words/min */
     return (int)(sum * 6 / 5);
 }
 

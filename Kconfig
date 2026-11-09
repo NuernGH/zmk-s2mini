@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: MIT
-# Dodatki dla klawiatury 60% na S2 mini: gałka z trybami, Raw HID z danymi z PC, własny ekran.
+# Extras for the 60% keyboard on the S2 mini: knob with modes, Raw HID with PC data, custom screen.
 
 config S2MINI_KNOB_MODES
-    bool "Gałka z trybami (&knob, &knob_next)"
+    bool "Knob with modes (&knob, &knob_next)"
     default y
     depends on DT_HAS_ZMK_BEHAVIOR_KNOB_MODES_ENABLED
 
 config S2MINI_RAW_HID
-    bool "Raw HID: dane z PC dla ekranu"
+    bool "Raw HID: data from the PC for the screen"
     depends on ZMK_USB_NEXT && USBD_HID_SUPPORT
     help
-      Drugi interfejs HID (strona 0xFF60, raporty 32 B). Wymaga węzła zephyr,hid-device
-      wskazanego przez chosen s2mini,raw-hid.
+      Second HID interface (usage page 0xFF60, 32 B reports). Needs a zephyr,hid-device node
+      selected with chosen s2mini,raw-hid.
 
 config S2MINI_RAW_HID_INIT_PRIORITY
     int "Raw HID init priority"
@@ -19,12 +19,12 @@ config S2MINI_RAW_HID_INIT_PRIORITY
     depends on S2MINI_RAW_HID
 
 config S2MINI_STATUS_SCREEN
-    bool "Ekran 60% S2 mini (warstwa, gałka, dane z PC)"
+    bool "S2 mini 60% screen (layer, knob, data from the PC)"
     depends on ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
     select LV_USE_LABEL
     select LV_USE_THEME_MONO
 
 config S2MINI_STATUS_PC_TIMEOUT_MS
-    int "Po ilu ms bez danych z PC ekran pokazuje 'no data from PC'"
+    int "Milliseconds without PC data before the screen shows 'no data from PC'"
     default 5000
     depends on S2MINI_STATUS_SCREEN

@@ -1,17 +1,17 @@
 /*
- * 60% ANSI na S2 mini: warstwy BASE, GAME, FN; gałka z trybami i przyciski modułu OLED.
- * Ostatni rząd w keymapie to przyciski modułu: PUSH (gałka), CON, BAK.
+ * 60% ANSI on the S2 mini: layers BASE, GAME, FN; knob with modes and OLED module buttons.
+ * The last row of the keymap is the module buttons: PUSH (knob), CON, BAK.
  *
- * Przyciski przy ekranie (bez Fn; krótko / długo, ponad 0,3 s):
- * PUSH       = następny tryb gałki: VOLUME → SCROLL → TRACK → BRIGHT / wyciszenie
- * CON        = poprzedni widok ekranu (główny, porty COM) / play-pauza
- * BAK        = następny widok ekranu / następny utwór
- * Fn + G     = tryb GAME (włącz/wyłącz): Win nie działa, Caps Lock wysyła F13
- *              (da się go przypisać w grze, nie zmienia wielkości liter)
- * Fn + \     = odblokowanie ZMK Studio
+ * Buttons next to the screen (no Fn; tap / hold for more than 0.3 s):
+ * PUSH       = next knob mode: VOLUME → SCROLL → TRACK → BRIGHT / mute
+ * CON        = previous screen view / play-pause
+ * BAK        = next screen view / next track
+ * Fn + G     = GAME mode (on/off): Win does nothing, Caps Lock sends F13
+ *              (bindable in games, does not change letter case)
+ * Fn + \     = unlock ZMK Studio
  *
- * Nazwy warstw (display-name) widać na ekranie; można je zmienić tu albo w ZMK Studio.
- * Nazwy trybów gałki są w węźle knob (mode-names).
+ * Layer names (display-name) are shown on the screen; change them here or in ZMK Studio.
+ * Knob mode names are in the knob node (mode-names).
  * SPDX-License-Identifier: MIT
  */
 #include <behaviors.dtsi>
@@ -59,7 +59,7 @@
             #binding-cells = <1>;
             display-name = "Screen view";
         };
-        /* Przyciski przy ekranie: krótko = tap (ekran/gałka), długo = hold (multimedia) */
+        /* Buttons next to the screen: tap = screen/knob, hold = media */
         push_ht: push_ht {
             compatible = "zmk,behavior-hold-tap";
             #binding-cells = <2>;

@@ -1,12 +1,12 @@
 """
-Ikony aplikacji do szybkiego startu na ekranie klawiatury.
+Quick launch app icons for the keyboard screen.
 
-- extract_icon(path): kolorowa ikona RGBA (Windows, ikona pliku .exe/.lnk/dowolnego przez powłokę),
-- to_keyboard(img, style, invert): ikona 32×32 w 1 bicie, jak ją pokaże OLED,
-- pack_bits(img) → 128 B do wysłania (wiersz = 4 bajty, bit 7 = lewy piksel, 1 = świeci).
+- extract_icon(path): colour RGBA icon (Windows; icon of an .exe/.lnk/any file via the shell),
+- to_keyboard(img, style, invert): 32×32 1-bit icon, as the OLED shows it,
+- pack_bits(img) → 128 B to send (row = 4 bytes, bit 7 = left pixel, 1 = lit).
 
-Style: "silhouette" (kształt ikony, wyraźny), "detail" (jasność z ditheringiem),
-"outline" (sam kontur), "auto" (sylwetka z wyciętymi ciemnymi detalami).
+Styles: "auto", "levels" (light/dark), "regions" (colour areas), "gray" (dithered shades),
+"lines" (line art), "silhouette", "detail", "outline".
 
 SPDX-License-Identifier: MIT
 """
@@ -19,25 +19,25 @@ SIZE = 32
 STYLES = ("auto", "regions", "levels", "gray", "lines", "silhouette", "detail", "outline")
 STYLE_NAMES = {
     "auto": "Auto",
-    "regions": "Plamy kolorów",
-    "levels": "Jasne/ciemne",
-    "gray": "Odcienie",
-    "lines": "Rysunek",
-    "silhouette": "Sylwetka",
-    "detail": "Szczegóły",
-    "outline": "Kontur",
+    "regions": "Colour areas",
+    "levels": "Light/dark",
+    "gray": "Shades",
+    "lines": "Line art",
+    "silhouette": "Silhouette",
+    "detail": "Detail",
+    "outline": "Outline",
 }
 
 
 def style_name(key):
-    """Nazwa stylu w języku programu."""
+    """Style name in the program's language."""
     from i18n import tr
     return tr(STYLE_NAMES.get(key, "Auto"))
 
 
 def _resolve_shortcut(path):
-    """Skrót .lnk → (plik z ikoną, indeks). Bez tego Windows dokleja strzałkę skrótu, a skróty
-    typu Discord/VS Code (Update.exe z parametrami) dają pustą ikonę pliku."""
+    """.lnk shortcut → (icon file, index). Without this Windows adds the shortcut arrow, and shortcuts
+    like Discord/VS Code (Update.exe with arguments) give an empty file icon."""
     try:
         import comtypes.client
         shell = comtypes.client.CreateObject("WScript.Shell", dynamic=True)
@@ -60,7 +60,7 @@ def _resolve_shortcut(path):
 
 
 def _hicon_from_file(file, index, size):
-    """HICON w dokładnym rozmiarze z pliku .exe/.dll/.ico (PrivateExtractIconsW)."""
+    """HICON of the exact size from an .exe/.dll/.ico file (PrivateExtractIconsW)."""
     import ctypes
     from ctypes import wintypes
     user32 = ctypes.windll.user32
@@ -74,8 +74,8 @@ def _hicon_from_file(file, index, size):
 
 
 def _draw_icon_windows(path, size):
-    """Ikona przez PrivateExtractIcons/SHGetFileInfo + DrawIconEx, rysowana na czarnym i białym
-    tle (→ alfa). Skróty .lnk rozwijane do pliku z ikoną (bez strzałki skrótu)."""
+    """Icon via PrivateExtractIcons/SHGetFileInfo + DrawIconEx, drawn on black and on white
+    (→ alpha). .lnk shortcuts are resolved to the icon file (no shortcut arrow)."""
     import ctypes
     from ctypes import wintypes
 
@@ -120,10 +120,10 @@ def _draw_icon_windows(path, size):
         file, index = _resolve_shortcut(path)
         if file:
             if file.lower().endswith(".ico"):
-                return None  # .ico czyta extract_icon przez PIL (patrz niżej)
+                return None  # extract_icon reads .ico through PIL (see below)
             hicon = _hicon_from_file(file, index, size)
             if hicon is None:
-                path = file  # SHGetFileInfo na pliku docelowym, już bez strzałki
+                path = file  # SHGetFileInfo on the target file, without the arrow
     elif path.lower().endswith((".exe", ".dll")):
         hicon = _hicon_from_file(path, 0, size)
     if hicon is None:
@@ -136,7 +136,7 @@ def _draw_icon_windows(path, size):
     def render(fill):
         bmi = BITMAPINFOHEADER()
         bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        bmi.biWidth, bmi.biHeight = size, -size  # od góry
+        bmi.biWidth, bmi.biHeight = size, -size  # top-down
         bmi.biPlanes, bmi.biBitCount = 1, 32
         screen = user32.GetDC(None)
         dc = gdi32.CreateCompatibleDC(screen)
@@ -158,7 +158,7 @@ def _draw_icon_windows(path, size):
     finally:
         user32.DestroyIcon(hicon)
 
-    # alfa = 1 - (białe - czarne); kolor = czarne / alfa
+    # alpha = 1 - (white - black); colour = black / alpha
     out = Image.new("RGBA", (size, size))
     pb, pw = on_black.load(), on_white.load()
     po = out.load()
@@ -176,17 +176,34 @@ def _draw_icon_windows(path, size):
 APPS_FOLDER = "shell:AppsFolder\\"
 
 
+def _package_path(family):
+    """Install folder of the first package of a family (kernel32, no PowerShell) or None."""
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    count, buflen = ctypes.c_uint32(0), ctypes.c_uint32(0)
+    k32.GetPackagesByPackageFamily(family, ctypes.byref(count), None, ctypes.byref(buflen), None)
+    if not count.value:
+        return None
+    names = (wintypes.LPWSTR * count.value)()
+    buf = ctypes.create_unicode_buffer(buflen.value)
+    if k32.GetPackagesByPackageFamily(family, ctypes.byref(count), names, ctypes.byref(buflen), buf):
+        return None
+    plen = ctypes.c_uint32(0)
+    k32.GetPackagePathByFullName(names[0], ctypes.byref(plen), None)
+    path = ctypes.create_unicode_buffer(plen.value or 1)
+    if k32.GetPackagePathByFullName(names[0], ctypes.byref(plen), path):
+        return None
+    return path.value or None
+
+
 def _appx_logo(aumid):
-    """Plik logo aplikacji MSIX (największy wariant PNG) z jej AppxManifest.xml albo None."""
+    """Logo file of an MSIX app (largest PNG variant) from its AppxManifest.xml, or None."""
     import glob
     import re
-    import subprocess
     import xml.etree.ElementTree as ET
     pfn, _, app_id = aumid.partition("!")
-    r = subprocess.run(["powershell", "-NoProfile", "-Command",
-                        f"(Get-AppxPackage | Where-Object PackageFamilyName -eq '{pfn}' | Select-Object -First 1).InstallLocation"],
-                       capture_output=True, timeout=15, creationflags=0x08000000)
-    loc = r.stdout.decode("utf-8", "replace").strip()
+    loc = _package_path(pfn)
     if not loc:
         return None
     root = ET.parse(os.path.join(loc, "AppxManifest.xml")).getroot()
@@ -217,7 +234,7 @@ def _appx_logo(aumid):
 
 
 def extract_icon(path, size=64):
-    """Kolorowa ikona aplikacji (RGBA) albo None. Obrazek (.png/.ico/.jpg) bierze wprost."""
+    """Colour app icon (RGBA) or None. Image files (.png/.ico/.jpg) are used directly."""
     if not path:
         return None
     if path.startswith(APPS_FOLDER):
@@ -252,7 +269,7 @@ def extract_icon(path, size=64):
 
 
 def _fit(img):
-    """Przycina przezroczyste brzegi i skaluje do 30×30 na środku pola 32×32 (większa ikona)."""
+    """Crops transparent edges and scales to 30×30 centred in a 32×32 field (bigger icon)."""
     img = img.convert("RGBA")
     box = img.getchannel("A").point(lambda a: 255 if a > 40 else 0).getbbox()
     if box:
@@ -264,7 +281,7 @@ def _fit(img):
 
 
 def to_keyboard(img, style="auto", invert=False):
-    """Ikona tak, jak ją pokaże OLED: obraz 1-bitowy 32×32 (biały = świeci)."""
+    """The icon as the OLED shows it: 1-bit 32×32 image (white = lit)."""
     if img is None:
         return placeholder()
     img = _fit(img)
@@ -286,12 +303,12 @@ def to_keyboard(img, style="auto", invert=False):
     elif style == "gray":
         out = _gray(lum, alpha, shape)
     elif style == "auto":
-        # jasne/ciemne, chyba że ikona jest prawie jednolita (wtedy plamy kolorów pokażą podział)
+        # light/dark, unless the icon is almost uniform (then colour areas show the split)
         lev = _levels(lum, shape)
         filled = sum(1 for v in shape.getdata() if v) or 1
         lit = sum(1 for v in lev.getdata() if v)
         out = lev if 0.2 < lit / filled < 0.9 else _regions(img, shape)
-    else:  # dawne auto
+    else:  # silhouette with dark details cut out (the former auto)
         dark = lum.point(lambda v: 255 if v < 70 else 0)
         holes = Image.composite(dark, Image.new("L", (SIZE, SIZE), 0), shape)
         inner = shape.filter(ImageFilter.MinFilter(3))
@@ -309,7 +326,7 @@ def to_keyboard(img, style="auto", invert=False):
 
 
 def _ring(shape):
-    """Obrys kształtu (1 px po wewnętrznej stronie)."""
+    """Shape outline (1 px on the inside)."""
     inner = shape.filter(ImageFilter.MinFilter(3))
     return ImageChops_sub(shape, inner)
 
@@ -341,7 +358,7 @@ def _otsu(values):
 
 
 def _levels(lum, shape):
-    """Jasne części świecą, ciemne nie (próg Otsu liczony tylko w ikonie), plus obrys kształtu."""
+    """Light parts are lit, dark ones not (Otsu threshold computed inside the icon only), plus the outline."""
     from PIL import ImageChops
     vals = [l for l, a in zip(lum.getdata(), shape.getdata()) if a]
     t = _otsu(vals)
@@ -351,7 +368,7 @@ def _levels(lum, shape):
 
 
 def _gray(lum, alpha, shape):
-    """Odcienie szarości wzorem (dithering Bayera 4×4), jasność rozciągnięta, plus obrys."""
+    """Grey shades as a pattern (Bayer 4×4 dithering), stretched brightness, plus the outline."""
     from PIL import ImageChops
     bayer = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
     vals = [l for l, a in zip(lum.getdata(), shape.getdata()) if a]
@@ -365,14 +382,14 @@ def _gray(lum, alpha, shape):
             if not sh[x, y]:
                 continue
             v = (src[x, y] - lo) / span  # 0..1
-            v = 0.15 + 0.85 * v          # ciemne też lekko świecą, żeby kształt był widoczny
+            v = 0.15 + 0.85 * v          # dark parts glow a little too, so the shape stays visible
             po[x, y] = 255 if v * 16 > bayer[y % 4][x % 4] + 0.5 else 0
     return ImageChops.lighter(out, _ring(shape))
 
 
 def _regions(img, shape, lines_only=False):
-    """Plamy kolorów: plamy świecą, a tam, gdzie kolor wyraźnie się zmienia, jest ciemna kreska.
-    lines_only: odwrotnie, świecą tylko te kreski i obrys (rysunek kreską)."""
+    """Colour areas: areas are lit, and where the colour changes clearly there is a dark line.
+    lines_only: the other way round, only those lines and the outline are lit (line art)."""
     from PIL import ImageChops
     rgb = Image.new("RGB", img.size, (0, 0, 0))
     rgb.paste(img.convert("RGB"), mask=shape)
@@ -391,7 +408,7 @@ def _regions(img, shape, lines_only=False):
                 continue
             c = px[x, y]
             edge = False
-            # kreska tylko po jednej stronie granicy (prawy/dolny sąsiad), żeby była cienka
+            # line only on one side of the edge (right/bottom neighbour), so it stays thin
             for dx, dy in ((1, 0), (0, 1)):
                 nx, ny = x + dx, y + dy
                 if nx < SIZE and ny < SIZE and sh[nx, ny] and dist(c, px[nx, ny]) > 70:
@@ -403,7 +420,7 @@ def _regions(img, shape, lines_only=False):
 
 
 def placeholder():
-    """Ikona zastępcza: zaokrąglony kwadrat z kropką."""
+    """Placeholder icon: rounded square with a dot."""
     img = Image.new("1", (SIZE, SIZE), 0)
     px = img.load()
     for y in range(SIZE):
@@ -417,7 +434,7 @@ def placeholder():
 
 
 def pack_bits(img1):
-    """1-bitowy obraz 32×32 → 128 B (bit 7 = lewy piksel)."""
+    """1-bit 32×32 image → 128 B (bit 7 = left pixel)."""
     img1 = img1.convert("1").resize((SIZE, SIZE))
     px = img1.load()
     out = bytearray(SIZE * SIZE // 8)
@@ -430,7 +447,7 @@ def pack_bits(img1):
 
 
 def preview(img1, scale=3, on=(235, 245, 255), off=(8, 10, 14)):
-    """Podgląd OLED do okna: piksele ×scale, kolory jak na ekranie."""
+    """OLED preview for the window: pixels ×scale, colours as on the screen."""
     img1 = img1.convert("1")
     rgb = Image.new("RGB", img1.size, off)
     rgb.paste(Image.new("RGB", img1.size, on), mask=img1.convert("L"))

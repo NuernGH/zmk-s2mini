@@ -1,5 +1,5 @@
 /*
- * &scr_view SCR_PREV / SCR_NEXT: przełącza widok ekranu (główny, minutnik, porty COM, ustawienia).
+ * &scr_view SCR_PREV / SCR_NEXT: switches the screen view (main, timer, COM ports, settings).
  * SPDX-License-Identifier: MIT
  */
 

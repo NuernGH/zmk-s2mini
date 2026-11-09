@@ -1,15 +1,15 @@
 /*
- * Ekran 128 × 64 dla 60% na S2 mini (wg szkicu oled-szkic, teksty po angielsku):
- *  1. główny: godzina, warstwa, CPU/GPU (obciążenie + temp.), głośność, tryb gałki;
- *  2. GAME (warstwa z etykietą game_layer aktywna): duże temperatury CPU/GPU;
- *  3. zmiana trybu gałki: na ok. 1,5 s nazwa trybu i kropki;
- *  4. brak danych z PC: tylko warstwa i tryb gałki;
- *  5. porty COM (CON/BAK przełączają widok; nowy port pokazuje się sam na 3 s);
- *  6. ściąga warstwy FN (gdy FN jest najwyższą aktywną warstwą);
- *  7. minutnik i 8. ustawienia (gałka steruje ekranem, PUSH zatwierdza);
- *  9. „TIME UP”, gdy minutnik dobiegnie końca.
- * Pasek u góry: godzina, Caps / Num Lock (A, 1), pozostały czas minutnika, warstwa.
- * Stan sprawdza timer LVGL co 100 ms, więc nic nie dotyka LVGL spoza wątku ekranu.
+ * 128 × 64 screen for the 60% on the S2 mini (per the oled-szkic sketch, texts in English):
+ *  1. main: clock, layer, CPU/GPU (load + temp.), volume, knob mode;
+ *  2. GAME (layer labelled game_layer active): large CPU/GPU temperatures;
+ *  3. knob mode change: mode name and dots for about 1.5 s;
+ *  4. no data from the PC: layer and knob mode only;
+ *  5. COM ports (CON/BAK switch views; a new port shows up on its own for 3 s);
+ *  6. FN layer cheat sheet (when FN is the highest active layer);
+ *  7. timer and 8. settings (the knob controls the screen, PUSH confirms);
+ *  9. "TIME UP" when the timer runs out.
+ * Top bar: clock, Caps / Num Lock (A, 1), timer time left, layer.
+ * State is polled by an LVGL timer every 100 ms, so nothing touches LVGL outside the display thread.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -65,7 +65,7 @@ enum view {
 #define HID_LED_NUM BIT(0)
 #define HID_LED_CAPS BIT(1)
 
-/* Pasek u góry widoku głównego i „bez PC”. */
+/* Top bar of the main and "no PC" views. */
 struct status_bar {
     lv_obj_t *time, *caps, *num, *timer, *layer;
 };
@@ -73,7 +73,7 @@ static struct status_bar bar_main, bar_no_pc;
 
 static lv_obj_t *views[VIEW_COUNT];
 
-/* 1. główny */
+/* 1. main */
 static lv_obj_t *m_knob;
 struct meter {
     lv_obj_t *fill, *pct, *temp;
@@ -86,45 +86,45 @@ static lv_obj_t *m_igpu_row[4];
 /* 2. GAME */
 static lv_obj_t *g_cpu_temp, *g_cpu_load, *g_gpu_temp, *g_gpu_load, *g_time, *g_vol, *g_knob;
 
-/* 3. tryb gałki */
+/* 3. knob mode */
 static lv_obj_t *k_name;
 #define MAX_DOTS 8
 static lv_obj_t *k_dots[MAX_DOTS];
 
 static lv_obj_t *m_wpm;
 
-/* 4. bez PC */
+/* 4. no PC */
 static lv_obj_t *n_knob, *n_wpm;
 
-/* 7. minutnik */
+/* 7. timer */
 static lv_obj_t *t_state, *t_time, *t_hint;
 
-/* 8. ustawienia */
+/* 8. settings */
 struct menu_row {
     lv_obj_t *box, *name, *value;
 };
 static struct menu_row s_rows[S2MINI_SET_COUNT];
 static lv_obj_t *s_hint;
 
-/* 9. koniec minutnika */
+/* 9. timer finished */
 static lv_obj_t *d_box, *d_title, *d_hint;
 
-/* 10. co gra + sieć */
+/* 10. now playing + network */
 static lv_obj_t *md_state, *md_title, *md_artist, *md_net;
 
 static void show(enum view which);
 
-/* 12. szybki start: 3 ikony (poprzednia, wybrana, następna) */
+/* 12. quick launch: 3 icons (previous, selected, next) */
 #define ICON_SLOTS 3
 static lv_obj_t *ln_count, *ln_name, *ln_frame, *ln_hint;
 static lv_obj_t *ln_img[ICON_SLOTS];
 static uint8_t ln_px[ICON_SLOTS][S2MINI_ICON_SIZE * S2MINI_ICON_SIZE];
 static lv_image_dsc_t ln_dsc[ICON_SLOTS];
 
-/* 11. powiadomienie */
+/* 11. notification */
 static lv_obj_t *nt_app, *nt_title, *nt_body;
 
-/* 5. porty COM */
+/* 5. COM ports */
 static lv_obj_t *p_count, *p_rows[PORT_ROWS];
 
 static lv_obj_t *box(lv_obj_t *parent, int x, int y, int w, int h, bool filled, int border) {
@@ -153,7 +153,7 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, bool inverted, l
 
 static lv_obj_t *top_bar(lv_obj_t *parent) { return box(parent, 0, 0, W, BAR_H, true, 0); }
 
-/* Mały wskaźnik w pasku: czarne pole z jasną literą (A = Caps Lock, 1 = Num Lock). */
+/* Small indicator in the bar: black box with a light letter (A = Caps Lock, 1 = Num Lock). */
 static lv_obj_t *indicator(lv_obj_t *parent, int x, const char *text) {
     lv_obj_t *o = lv_obj_create(parent);
     lv_obj_remove_style_all(o);
@@ -212,7 +212,7 @@ static void meter_set(struct meter *m, bool valid, int pct, int temp_c, const ch
 
 static void create_main(lv_obj_t *v) {
     status_bar_create(&bar_main, v);
-    /* Wiersze co 10 px: CPU, GPU (karta), IGP (Intel, gdy PC go przysyła), VOL. */
+    /* Rows every 10 px: CPU, GPU (card), IGP (Intel, when the PC sends it), VOL. */
     meter_create(&m_cpu, v, 13, "CPU", true);
     meter_create(&m_gpu, v, 23, "GPU", true);
     uint32_t before = lv_obj_get_child_count(v);
@@ -263,7 +263,7 @@ static void create_no_pc(lv_obj_t *v) {
     n_wpm = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_RIGHT, 0, 0, "");
 }
 
-/* Ściąga warstwy FN (zgodna z keymapą s2mini_60.keymap). */
+/* FN layer cheat sheet (matches s2mini_60.keymap). */
 static void create_fn(lv_obj_t *v) {
     top_bar(v);
     label(v, &s2m_font_9, true, LV_ALIGN_TOP_LEFT, 2, 1, "FN LAYER");
@@ -363,7 +363,7 @@ static void create_media(lv_obj_t *v) {
     md_net = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_LEFT, 0, 0, "");
 }
 
-/* Ustawia tekst tylko przy zmianie, bo każde ustawienie restartuje przewijanie. */
+/* Sets the text only when it changes, because every set restarts scrolling. */
 static void set_text_if_changed(lv_obj_t *l, const char *text) {
     if (strcmp(lv_label_get_text(l), text) != 0) {
         lv_label_set_text(l, text);
@@ -427,7 +427,7 @@ static void create_notif(lv_obj_t *v) {
     lv_label_set_long_mode(nt_body, LV_LABEL_LONG_MODE_WRAP);
 }
 
-/* Nowe powiadomienie z Windows: okienko na kilka sekund. Zwraca true, gdy pokazane. */
+/* New Windows notification: popup for a few seconds. Returns true if shown. */
 static bool notif_popup(void) {
 #if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
     struct s2mini_notif n;
@@ -515,7 +515,7 @@ static void update_launcher(bool have_pc) {
     static uint8_t bits[S2MINI_ICON_BYTES];
     char name[S2MINI_APP_NAME];
     for (int i = 0; i < ICON_SLOTS; i++) {
-        /* przy 1–2 aplikacjach boczne miejsca zostają puste */
+        /* with 1–2 apps the side slots stay empty */
         bool used = count >= 3 || i == 1 || (count == 2 && i == 2);
         int index = ((sel + i - 1) % count + count) % count;
         if (!used || !s2mini_app_get(index, name, bits)) {
@@ -534,7 +534,7 @@ static void update_launcher(bool have_pc) {
 #endif
 }
 
-/* Nowy utwór pokazuje okienko „co gra” na kilka sekund. */
+/* A new track shows the "now playing" popup for a few seconds. */
 static bool media_popup(void) {
 #if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
     struct s2mini_media m;
@@ -680,7 +680,7 @@ static void update_settings_view(const struct s2mini_ui_settings *c) {
     lv_label_set_text(s_hint, editing ? "turn: change  push: save" : "turn: move  push: change");
 }
 
-/* Jasność i odwrócenie kolorów idą prosto do sterownika ekranu (wątek ekranu). */
+/* Brightness and colour inversion go straight to the display driver (display thread). */
 static void apply_display_settings(const struct s2mini_ui_settings *c) {
 #if DT_HAS_CHOSEN(zephyr_display)
     static const uint8_t contrast[S2MINI_BRIGHTNESS_LEVELS] = {8, 40, 100, 170, 255};
@@ -734,7 +734,7 @@ static void update_cb(lv_timer_t *timer) {
 #endif
     fmt_clock(clock, sizeof(clock), &pc, have_pc, c.clock12);
 
-    /* Minutnik dobiegł końca: cały ekran miga co 0,5 s, aż PUSH albo 30 s. */
+    /* Timer ran out: the whole screen flashes every 0.5 s until PUSH or 30 s. */
     if (t.state == S2MINI_TIMER_DONE) {
         bool lit = (t.done_ms / 500) % 2 == 0;
         lv_obj_set_style_bg_opa(d_box, lit ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
@@ -847,7 +847,7 @@ static void update_cb(lv_timer_t *timer) {
         } else {
             lv_label_set_text(g_vol, "");
         }
-        /* Na dole jest mało miejsca: pierwsze 3 litery nazwy trybu, małymi literami. */
+        /* Little space at the bottom: first 3 letters of the mode name, lower case. */
         snprintf(buf, sizeof(buf), "knob:%.3s", knob);
         for (char *ch = buf; *ch; ch++) {
             if (*ch >= 'A' && *ch <= 'Z') {
