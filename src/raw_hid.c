@@ -36,6 +36,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/init.h>
 #include <zephyr/spinlock.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/usb/class/usbd_hid.h>
 #include <zephyr/logging/log.h>
@@ -295,18 +296,49 @@ static void parse_app_icon(const uint8_t *buf, uint16_t len) {
     }
 }
 
+/* Launch request state for the screen: result of the last send and whether the PC took it. */
+static atomic_t launch_in_flight;
+static int launch_err;
+static int64_t launch_at;
+static atomic_t launch_done;
+
+void s2mini_launch_status(int *err, bool *in_flight, bool *done, int64_t *at) {
+    *err = launch_err;
+    *in_flight = atomic_get(&launch_in_flight) != 0;
+    *done = atomic_get(&launch_done) != 0;
+    *at = launch_at;
+}
+
 int s2mini_app_launch(int index) {
     const struct device *dev = DEVICE_DT_GET(RAW_HID_NODE);
-    static uint8_t report[RAW_HID_REPORT_SIZE];
+    static uint8_t __aligned(4) report[RAW_HID_REPORT_SIZE];
+    launch_at = k_uptime_get();
+    atomic_set(&launch_done, 0);
+    if (atomic_get(&launch_in_flight)) {
+        /* The previous request was never read by the PC; the buffer is still queued. */
+        launch_err = -EBUSY;
+        LOG_WRN("launch report: previous one still pending");
+        return -EBUSY;
+    }
     memset(report, 0, sizeof(report));
     report[0] = FRAME_MAGIC;
     report[1] = FRAME_LAUNCH;
     report[2] = index;
+    atomic_set(&launch_in_flight, 1);
     int err = hid_device_submit_report(dev, sizeof(report), report);
+    launch_err = err;
     if (err) {
+        atomic_set(&launch_in_flight, 0);
         LOG_WRN("launch report failed: %d", err);
     }
     return err;
+}
+
+/* With this callback the send is asynchronous: before, the caller (system work queue) waited
+ * forever for the PC to read the report. */
+static void raw_input_done(const struct device *dev, const uint8_t *const report) {
+    atomic_set(&launch_in_flight, 0);
+    atomic_set(&launch_done, 1);
 }
 
 static void parse_frame(const uint8_t *buf, uint16_t len) {
@@ -396,6 +428,7 @@ static const struct hid_device_ops raw_hid_ops = {
     .get_report = raw_get_report,
     .set_report = raw_set_report,
     .output_report = raw_output_report,
+    .input_report_done = raw_input_done,
 };
 
 static int s2mini_raw_hid_init(void) {
