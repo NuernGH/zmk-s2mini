@@ -83,6 +83,8 @@ int s2mini_apps_count(void);                 /* -1 = list not received yet */
 uint32_t s2mini_apps_version(void);          /* changes whenever the list/icons change */
 bool s2mini_app_get(int index, char name[S2MINI_APP_NAME], uint8_t icon[S2MINI_ICON_BYTES]);
 int s2mini_app_launch(int index);            /* asks the PC to launch the app */
+/* Last launch request: send result, still waiting for the PC, read by the PC, when. */
+void s2mini_launch_status(int *err, bool *in_flight, bool *done, int64_t *at);
 int s2mini_launcher_selected(void);
 
 /* Screen view selected with &scr_view (CON / BAK). */

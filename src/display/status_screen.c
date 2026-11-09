@@ -569,6 +569,25 @@ static void update_launcher(bool have_pc) {
         shown_count = -2;
         return;
     }
+    /* Top right: "2/5", or for 3 s after PUSH what happened to the launch request. */
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d/%d", sel + 1, count);
+#if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
+    {
+        int err;
+        bool in_flight, done;
+        int64_t at;
+        s2mini_launch_status(&err, &in_flight, &done, &at);
+        if (at != 0 && k_uptime_get() - at < 3000) {
+            if (err) {
+                snprintf(buf, sizeof(buf), "USB err %d", err);
+            } else {
+                snprintf(buf, sizeof(buf), "%s", done ? "sent" : (in_flight ? "waiting" : "?"));
+            }
+        }
+    }
+#endif
+    set_text_if_changed(ln_count, buf);
     if (version == shown_version && sel == shown_sel && count == shown_count) {
         return;
     }
@@ -577,9 +596,6 @@ static void update_launcher(bool have_pc) {
     shown_count = count;
     set_text_if_changed(ln_hint, "");
     lv_obj_clear_flag(ln_frame, LV_OBJ_FLAG_HIDDEN);
-    char buf[12];
-    snprintf(buf, sizeof(buf), "%d/%d", sel + 1, count);
-    set_text_if_changed(ln_count, buf);
 
 #if IS_ENABLED(CONFIG_S2MINI_RAW_HID)
     static uint8_t bits[S2MINI_ICON_BYTES];
