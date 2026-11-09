@@ -29,6 +29,12 @@ STYLE_NAMES = {
 }
 
 
+def style_name(key):
+    """Nazwa stylu w języku programu."""
+    from i18n import tr
+    return tr(STYLE_NAMES.get(key, "Auto"))
+
+
 def _resolve_shortcut(path):
     """Skrót .lnk → (plik z ikoną, indeks). Bez tego Windows dokleja strzałkę skrótu, a skróty
     typu Discord/VS Code (Update.exe z parametrami) dają pustą ikonę pliku."""

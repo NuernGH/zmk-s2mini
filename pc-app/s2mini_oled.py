@@ -560,6 +560,7 @@ DEFAULT_CONFIG = {
     "data": {k: k != "notifications" for k in DATA_KEYS},
     "apps": [],  # {"name", "path", "style", "invert", "icon"(opcjonalny obrazek)}
     "default_style": "auto",
+    "language": "auto",  # auto = jak Windows, albo "pl" / "en"
 }
 
 
@@ -576,6 +577,7 @@ def load_config():
         cfg["data"].update({k: bool(v) for k, v in saved.get("data", {}).items() if k in DATA_KEYS})
         cfg["apps"] = [a for a in saved.get("apps", []) if isinstance(a, dict) and a.get("path")][:APPS_MAX]
         cfg["default_style"] = saved.get("default_style", "auto")
+        cfg["language"] = saved.get("language", "auto")
     except FileNotFoundError:
         pass
     except Exception as e:

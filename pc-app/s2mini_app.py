@@ -24,7 +24,9 @@ from tkinter import filedialog
 import customtkinter as ctk
 from PIL import Image, ImageDraw
 
+import i18n
 import icons
+from i18n import tr
 import keymap_tab
 import s2mini_oled as core
 
@@ -36,14 +38,14 @@ CARD_HI = "#1e232c"
 MUTED = "#8a93a3"
 
 DATA_LABELS = [
-    ("cpu", "Procesor (obciążenie, temperatura)"),
-    ("gpu", "Karta graficzna"),
-    ("igpu", "Grafika zintegrowana (Intel)"),
-    ("volume", "Głośność"),
-    ("net", "Prędkość sieci"),
-    ("media", "Co gra (tytuł, wykonawca)"),
-    ("ports", "Porty COM"),
-    ("notifications", "Powiadomienia Windows (widoczne dla każdego przy klawiaturze)"),
+    ("cpu", tr("Procesor (obciążenie, temperatura)")),
+    ("gpu", tr("Karta graficzna")),
+    ("igpu", tr("Grafika zintegrowana (Intel)")),
+    ("volume", tr("Głośność")),
+    ("net", tr("Prędkość sieci")),
+    ("media", tr("Co gra (tytuł, wykonawca)")),
+    ("ports", tr("Porty COM")),
+    ("notifications", tr("Powiadomienia Windows (widoczne dla każdego przy klawiaturze)")),
 ]
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -161,7 +163,7 @@ class AppRow(ctk.CTkFrame):
         ctk.CTkLabel(icon_box, text="", image=ctk_image(oled, (64, 64)), fg_color="#05070a",
                      corner_radius=6).pack(side="left")
 
-        self.name = ctk.CTkEntry(self, placeholder_text="Nazwa na ekranie", border_width=0, fg_color=CARD_HI)
+        self.name = ctk.CTkEntry(self, placeholder_text=tr("Nazwa na ekranie"), border_width=0, fg_color=CARD_HI)
         self.name.insert(0, app.get("name", ""))
         self.name.grid(row=0, column=2, sticky="ew", padx=8, pady=(10, 2))
         self.name.bind("<FocusOut>", self._rename)
@@ -171,17 +173,17 @@ class AppRow(ctk.CTkFrame):
 
         opts = ctk.CTkFrame(self, fg_color="transparent")
         opts.grid(row=0, column=3, rowspan=2, padx=6)
-        self.style = ctk.CTkButton(opts, text=f"Styl: {icons.STYLE_NAMES.get(app.get('style', 'auto'), 'Auto')}  ▾",
+        self.style = ctk.CTkButton(opts, text=tr("Styl: {s}  ▾", s=icons.style_name(app.get("style", "auto"))),
                                    height=26, width=170, fg_color=CARD_HI,
                                    command=lambda: StylePicker(window, index, src))
         self.style.pack(pady=(0, 4))
         row2 = ctk.CTkFrame(opts, fg_color="transparent")
         row2.pack(fill="x")
-        self.inv = ctk.CTkSwitch(row2, text="Odwróć", command=self._invert, width=40)
+        self.inv = ctk.CTkSwitch(row2, text=tr("Odwróć"), command=self._invert, width=40)
         if app.get("invert"):
             self.inv.select()
         self.inv.pack(side="left")
-        ctk.CTkButton(row2, text="Obrazek…", width=80, height=24, fg_color=CARD_HI,
+        ctk.CTkButton(row2, text=tr("Obrazek…"), width=80, height=24, fg_color=CARD_HI,
                       command=self._custom_icon).pack(side="left", padx=6)
 
         btns = ctk.CTkFrame(self, fg_color="transparent")
@@ -200,8 +202,8 @@ class AppRow(ctk.CTkFrame):
         self.window.update_app(self.index, invert=bool(self.inv.get()), rebuild=True)
 
     def _custom_icon(self):
-        path = filedialog.askopenfilename(title="Obrazek ikony", filetypes=[
-            ("Obrazki", "*.png *.ico *.jpg *.jpeg *.bmp *.gif"), ("Wszystkie", "*.*")])
+        path = filedialog.askopenfilename(title=tr("Obrazek ikony"), filetypes=[
+            (tr("Obrazki"), "*.png *.ico *.jpg *.jpeg *.bmp *.gif"), (tr("Wszystkie"), "*.*")])
         if path:
             self.window.update_app(self.index, icon=path, rebuild=True)
 
@@ -213,7 +215,7 @@ class StylePicker(ctk.CTkToplevel):
         super().__init__(window)
         self.window, self.index = window, index
         app = window.cfg["apps"][index]
-        self.title(f"Styl ikony: {app.get('name') or app['path']}")
+        self.title(tr("Styl ikony: {name}", name=app.get("name") or app["path"]))
         self.configure(fg_color=BG)
         self.resizable(False, False)
         self.after(50, self.grab_set)
@@ -228,12 +230,12 @@ class StylePicker(ctk.CTkToplevel):
             b = ctk.CTkButton(cell, text="", image=ctk_image(pv, (96, 96)), width=104, height=104,
                               fg_color="#05070a", hover_color="#1b2230", command=lambda k=key: self.pick(k))
             b.pack(padx=6, pady=(6, 2))
-            ctk.CTkLabel(cell, text=icons.STYLE_NAMES[key]).pack(pady=(0, 6))
+            ctk.CTkLabel(cell, text=icons.style_name(key)).pack(pady=(0, 6))
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(fill="x", padx=16, pady=(0, 16))
-        self.all = ctk.CTkCheckBox(row, text="Ustaw dla wszystkich aplikacji")
+        self.all = ctk.CTkCheckBox(row, text=tr("Ustaw dla wszystkich aplikacji"))
         self.all.pack(side="left")
-        ctk.CTkButton(row, text="Anuluj", width=90, fg_color=CARD_HI, command=self.destroy).pack(side="right")
+        ctk.CTkButton(row, text=tr("Anuluj"), width=90, fg_color=CARD_HI, command=self.destroy).pack(side="right")
 
     def pick(self, key):
         if self.all.get():
@@ -251,12 +253,12 @@ class StartMenuPicker(ctk.CTkToplevel):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.title("Dodaj z menu Start")
+        self.title(tr("Dodaj z menu Start"))
         self.geometry("460x560")
         self.configure(fg_color=BG)
         self.after(50, self.grab_set)
         self.items = start_menu_shortcuts()
-        self.search = ctk.CTkEntry(self, placeholder_text="Szukaj…")
+        self.search = ctk.CTkEntry(self, placeholder_text=tr("Szukaj…"))
         self.search.pack(fill="x", padx=14, pady=(14, 8))
         self.search.bind("<KeyRelease>", lambda _: self.fill())
         self.listbox = ctk.CTkScrollableFrame(self, fg_color=CARD, corner_radius=12)
@@ -298,10 +300,10 @@ class Window(ctk.CTk):
         side.grid(row=0, column=0, sticky="ns")
         side.grid_propagate(False)
         ctk.CTkLabel(side, text="S2 mini 60", font=ctk.CTkFont(size=20, weight="bold")).pack(anchor="w", padx=20, pady=(22, 0))
-        ctk.CTkLabel(side, text="ekran klawiatury", text_color=MUTED).pack(anchor="w", padx=20, pady=(0, 18))
+        ctk.CTkLabel(side, text=tr("ekran klawiatury"), text_color=MUTED).pack(anchor="w", padx=20, pady=(0, 18))
         self.pages, self.nav = {}, {}
-        for key, label in (("launcher", "Szybki start"), ("keymap", "Keymapa"), ("screen", "Ekran"),
-                           ("status", "Stan")):
+        for key, label in (("launcher", tr("Szybki start")), ("keymap", tr("Keymapa")), ("screen", tr("Ekran")),
+                           ("status", tr("Stan"))):
             b = ctk.CTkButton(side, text=label, anchor="w", height=36, corner_radius=8,
                               fg_color="transparent", hover_color=CARD_HI, command=lambda k=key: self.show(k))
             b.pack(fill="x", padx=12, pady=2)
@@ -327,13 +329,13 @@ class Window(ctk.CTk):
 
     def _launcher_page(self, body):
         page = ctk.CTkFrame(body, fg_color="transparent")
-        self._header(page, "Szybki start",
-                     "Na klawiaturze: CON/BAK do widoku LAUNCH, gałka wybiera, wciśnięcie uruchamia.\n"
-                     f"Do {core.APPS_MAX} aplikacji. Podgląd po prawej ikonie to dokładnie to, co pokaże OLED.")
+        self._header(page, tr("Szybki start"),
+                     tr("Na klawiaturze: CON/BAK do widoku LAUNCH, gałka wybiera, wciśnięcie uruchamia.\n"
+                        "Do {n} aplikacji. Podgląd po prawej ikonie to dokładnie to, co pokaże OLED.", n=core.APPS_MAX))
         bar = ctk.CTkFrame(page, fg_color="transparent")
         bar.pack(fill="x", pady=(0, 10))
-        ctk.CTkButton(bar, text="+ Z menu Start", command=lambda: StartMenuPicker(self)).pack(side="left")
-        ctk.CTkButton(bar, text="+ Plik / program…", fg_color=CARD_HI, command=self._add_file).pack(side="left", padx=8)
+        ctk.CTkButton(bar, text=tr("+ Z menu Start"), command=lambda: StartMenuPicker(self)).pack(side="left")
+        ctk.CTkButton(bar, text=tr("+ Plik / program…"), fg_color=CARD_HI, command=self._add_file).pack(side="left", padx=8)
         self.count_label = ctk.CTkLabel(bar, text="", text_color=MUTED)
         self.count_label.pack(side="right")
         self.app_list = ctk.CTkScrollableFrame(page, fg_color="transparent")
@@ -343,7 +345,7 @@ class Window(ctk.CTk):
 
     def _screen_page(self, body):
         page = ctk.CTkFrame(body, fg_color="transparent")
-        self._header(page, "Ekran", "Co program wysyła na ekran klawiatury. Zmiany działają od razu.")
+        self._header(page, tr("Ekran"), tr("Co program wysyła na ekran klawiatury. Zmiany działają od razu."))
         card = ctk.CTkFrame(page, fg_color=CARD, corner_radius=12)
         card.pack(fill="x")
         self.switches = {}
@@ -355,24 +357,33 @@ class Window(ctk.CTk):
             self.switches[key] = sw
         card3 = ctk.CTkFrame(page, fg_color=CARD, corner_radius=12)
         card3.pack(fill="x", pady=(14, 0))
-        ctk.CTkLabel(card3, text="Domyślny styl ikon nowych aplikacji").pack(side="left", padx=18, pady=12)
-        self.default_style = ctk.CTkOptionMenu(card3, values=[icons.STYLE_NAMES[s] for s in icons.STYLES],
+        ctk.CTkLabel(card3, text=tr("Domyślny styl ikon nowych aplikacji")).pack(side="left", padx=18, pady=12)
+        self.default_style = ctk.CTkOptionMenu(card3, values=[icons.style_name(s) for s in icons.STYLES],
                                                command=self._default_style)
-        self.default_style.set(icons.STYLE_NAMES.get(self.cfg.get("default_style", "auto"), "Auto"))
+        self.default_style.set(icons.style_name(self.cfg.get("default_style", "auto")))
         self.default_style.pack(side="left", padx=8)
+        card4 = ctk.CTkFrame(page, fg_color=CARD, corner_radius=12)
+        card4.pack(fill="x", pady=(14, 0))
+        ctk.CTkLabel(card4, text="Język / Language").pack(side="left", padx=18, pady=12)
+        labels = [l for _, l in i18n.CHOICES]
+        self.lang = ctk.CTkOptionMenu(card4, values=labels, command=self._language)
+        self.lang.set(dict(i18n.CHOICES).get(self.cfg.get("language", "auto"), labels[0]))
+        self.lang.pack(side="left", padx=8)
+        self.lang_note = ctk.CTkLabel(card4, text="", text_color=MUTED)
+        self.lang_note.pack(side="left", padx=8)
         card2 = ctk.CTkFrame(page, fg_color=CARD, corner_radius=12)
         card2.pack(fill="x", pady=14)
-        self.auto = ctk.CTkSwitch(card2, text="Uruchamiaj razem z Windows", command=self._autostart)
+        self.auto = ctk.CTkSwitch(card2, text=tr("Uruchamiaj razem z Windows"), command=self._autostart)
         if autostart_get():
             self.auto.select()
         self.auto.pack(anchor="w", padx=18, pady=12)
-        ctk.CTkLabel(page, text="Temperatury CPU/GPU: LibreHardwareMonitor z włączonym „Remote Web Server” (port 8085).",
+        ctk.CTkLabel(page, text=tr("Temperatury CPU/GPU: LibreHardwareMonitor z włączonym „Remote Web Server” (port 8085)."),
                      text_color=MUTED).pack(anchor="w")
         return page
 
     def _status_page(self, body):
         page = ctk.CTkFrame(body, fg_color="transparent")
-        self._header(page, "Stan", "Ostatnie dane wysłane do klawiatury.")
+        self._header(page, tr("Stan"), tr("Ostatnie dane wysłane do klawiatury."))
         self.status_box = ctk.CTkTextbox(page, fg_color=CARD, corner_radius=12, height=200,
                                          font=ctk.CTkFont(family="Consolas", size=13))
         self.status_box.pack(fill="both", expand=True)
@@ -390,7 +401,7 @@ class Window(ctk.CTk):
             w.destroy()
         apps = self.cfg["apps"]
         if not apps:
-            ctk.CTkLabel(self.app_list, text="Brak aplikacji. Dodaj z menu Start albo wskaż plik.",
+            ctk.CTkLabel(self.app_list, text=tr("Brak aplikacji. Dodaj z menu Start albo wskaż plik."),
                          text_color=MUTED).pack(pady=40)
         for i, app in enumerate(apps):
             AppRow(self.app_list, self, i, app).pack(fill="x", pady=4)
@@ -410,8 +421,8 @@ class Window(ctk.CTk):
         self._rebuild_apps()
 
     def _add_file(self):
-        path = filedialog.askopenfilename(title="Wybierz program", filetypes=[
-            ("Programy i skróty", "*.exe *.lnk *.url *.bat *.cmd"), ("Wszystkie", "*.*")])
+        path = filedialog.askopenfilename(title=tr("Wybierz program"), filetypes=[
+            (tr("Programy i skróty"), "*.exe *.lnk *.url *.bat *.cmd"), (tr("Wszystkie"), "*.*")])
         if path:
             self.add_app(os.path.normpath(path))
 
@@ -441,8 +452,13 @@ class Window(ctk.CTk):
         self._save()
 
     def _default_style(self, label):
-        self.cfg["default_style"] = next(k for k, v in icons.STYLE_NAMES.items() if v == label)
+        self.cfg["default_style"] = next(k for k in icons.STYLES if icons.style_name(k) == label)
         self._save()
+
+    def _language(self, label):
+        self.cfg["language"] = next(k for k, l in i18n.CHOICES if l == label)
+        self._save()
+        self.lang_note.configure(text=tr("Zmiana języka działa po ponownym uruchomieniu programu."))
 
     def _autostart(self):
         try:
@@ -453,7 +469,7 @@ class Window(ctk.CTk):
     # --- odświeżanie ---
     def _tick(self):
         ok = self.sender.status == "connected"
-        self.status_dot.configure(text="●  połączono" if ok else f"●  {self.sender.status}",
+        self.status_dot.configure(text=tr("●  połączono") if ok else "●  " + tr(self.sender.status),
                                   text_color="#5fd38d" if ok else "#e0a040")
         line = self.sender.last_line
         if line:
@@ -480,6 +496,7 @@ def main():
         core.media_child()
         return
     hidden = "--hidden" in sys.argv
+    i18n.init(core.load_config().get("language", "auto"))
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
 
@@ -501,9 +518,9 @@ def main():
             win.after(0, win.destroy)
 
         menu = pystray.Menu(
-            pystray.MenuItem(lambda _: f"S2 mini 60: {sender.status}", None, enabled=False),
-            pystray.MenuItem("Otwórz", on_open, default=True),
-            pystray.MenuItem("Zakończ", on_quit))
+            pystray.MenuItem(lambda _: "S2 mini 60: " + tr(sender.status), None, enabled=False),
+            pystray.MenuItem(tr("Otwórz"), on_open, default=True),
+            pystray.MenuItem(tr("Zakończ"), on_quit))
         tray = pystray.Icon("s2mini60", tray_image(), APP_TITLE, menu)
         threading.Thread(target=tray.run, daemon=True).start()
     except Exception:

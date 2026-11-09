@@ -92,7 +92,39 @@ _k("C_AL_FILES", "Pliki", "Eksplorator plików", "Multimedia", 0x194, 0xB6, CONS
 _k("C_AL_WWW", "WWW", "Przeglądarka", "Multimedia", 0x196, 0xAC, CONSUMER)
 _k("C_AL_MAIL", "Poczta", "Poczta", "Multimedia", 0x18A, 0xB4, CONSUMER)
 
-KEYS = [dict(id=a, short=b, pl=c, group=d, page=e, usage=f, vk=g) for a, b, c, d, e, f, g in _K]
+_EN = {
+    "Enter": "Enter", "Escape": "Escape", "Backspace": "Backspace", "Tabulator": "Tab", "Spacja": "Space",
+    "Minus  - _": "Minus  - _", "Równa się  = +": "Equal  = +", "Nawias kwadratowy lewy  [ {": "Left bracket  [ {",
+    "Nawias kwadratowy prawy  ] }": "Right bracket  ] }", "Ukośnik wsteczny  \\ |": "Backslash  \\ |",
+    "Klawisz ISO # ~ (obok Enter)": "ISO # ~ key (next to Enter)", "Średnik  ; :": "Semicolon  ; :",
+    "Apostrof  ' \"": "Quote  ' \"", "Grawis  ` ~ (tylda)": "Grave  ` ~", "Przecinek  , <": "Comma  , <",
+    "Kropka  . >": "Period  . >", "Ukośnik  / ?": "Slash  / ?", "Caps Lock": "Caps Lock", "Print Screen": "Print Screen",
+    "Scroll Lock": "Scroll Lock", "Pause / Break": "Pause / Break", "Insert": "Insert", "Home": "Home",
+    "Page Up": "Page Up", "Delete": "Delete", "End": "End", "Page Down": "Page Down",
+    "Strzałka w prawo": "Right arrow", "Strzałka w lewo": "Left arrow", "Strzałka w dół": "Down arrow",
+    "Strzałka w górę": "Up arrow", "Num Lock": "Num Lock", "Klawisz ISO obok lewego Shift  \\ |": "ISO key next to left Shift",
+    "Menu kontekstowe": "Context menu (App)", "Japoński Ro (INT1)": "International 1 (Ro)",
+    "Japoński Yen (INT3)": "International 3 (Yen)", "Przełącz język 1": "Language 1", "Przełącz język 2": "Language 2",
+    "Lewy Ctrl": "Left Ctrl", "Lewy Shift": "Left Shift", "Lewy Alt": "Left Alt", "Lewy Win (GUI)": "Left GUI (Win)",
+    "Prawy Ctrl": "Right Ctrl", "Prawy Shift": "Right Shift", "Prawy Alt (AltGr)": "Right Alt (AltGr)",
+    "Prawy Win (GUI)": "Right GUI (Win)", "Głośniej": "Volume up", "Ciszej": "Volume down", "Wycisz": "Mute",
+    "Odtwórz / pauza": "Play / pause", "Następny utwór": "Next track", "Poprzedni utwór": "Previous track",
+    "Zatrzymaj": "Stop", "Jaśniej (ekran)": "Brightness up", "Ciemniej (ekran)": "Brightness down",
+    "Kalkulator": "Calculator", "Eksplorator plików": "File browser", "Przeglądarka": "Web browser", "Poczta": "Mail",
+}
+_SHORT_EN = {"Spacja": "Space", "Kalk": "Calc", "Pliki": "Files", "Poczta": "Mail", "Jasn+": "Bri+", "Jasn−": "Bri−"}
+
+
+def _en(pl):
+    for a, b in (("Litera ", "Letter "), ("Cyfra ", "Digit "), ("Klawiatura numeryczna , (kropka)", "Keypad ."),
+                 ("Klawiatura numeryczna ", "Keypad ")):
+        if pl.startswith(a):
+            return b + pl[len(a):]
+    return _EN.get(pl, pl)
+
+
+KEYS = [dict(id=a, short=b, pl=c, en=_en(c), short_en=_SHORT_EN.get(b, b), group=d, page=e, usage=f, vk=g)
+        for a, b, c, d, e, f, g in _K]
 BY_USAGE = {(k["page"], k["usage"]): k for k in KEYS}
 BY_ID = {k["id"]: k for k in KEYS}
 BY_VK = {}
@@ -128,9 +160,25 @@ def mods_text(mods):
     return "+".join(name for _, name, bit in MODS if mods & bit)
 
 
+def _lang():
+    try:
+        import i18n
+        return i18n.LANG
+    except Exception:
+        return "pl"
+
+
+def desc(key):
+    return key["en"] if _lang() == "en" else key["pl"]
+
+
 def label(value, long=False):
     key, mods, page, usage = decode(value)
-    name = (key["pl"] if long else key["short"]) if key else f"0x{page:02X}:{usage:04X}"
+    en = _lang() == "en"
+    if key:
+        name = desc(key) if long else (key["short_en"] if en else key["short"])
+    else:
+        name = f"0x{page:02X}:{usage:04X}"
     if mods:
         return f"{mods_text(mods)}+{name}"
     return name
