@@ -15,6 +15,7 @@ config S2MINI_EC11_POLL
 
 config S2MINI_RAW_HID
     bool "Raw HID: data from the PC for the screen"
+    select REBOOT
     depends on ZMK_USB_NEXT && USBD_HID_SUPPORT
     help
       Second HID interface (usage page 0xFF60, 32 B reports). Needs a zephyr,hid-device node
@@ -28,6 +29,7 @@ config S2MINI_RAW_HID_INIT_PRIORITY
 config S2MINI_STATUS_SCREEN
     bool "S2 mini 60% screen (layer, knob, data from the PC)"
     depends on ZMK_DISPLAY_STATUS_SCREEN_CUSTOM
+    select REBOOT
     select LV_USE_LABEL
     select LV_USE_THEME_MONO
 

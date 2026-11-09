@@ -290,7 +290,7 @@ static void create_timer(lv_obj_t *v) {
 }
 
 static const char *const setting_names[S2MINI_SET_COUNT] = {"Brightness", "Invert", "Clock",
-                                                            "WPM"};
+                                                            "WPM", "Update FW"};
 
 static void create_settings(lv_obj_t *v) {
     top_bar(v);
@@ -301,7 +301,8 @@ static void create_settings(lv_obj_t *v) {
         r->name = label(r->box, &s2m_font_9, false, LV_ALIGN_LEFT_MID, 2, 0, setting_names[i]);
         r->value = label(r->box, &s2m_font_9, false, LV_ALIGN_RIGHT_MID, -2, 0, "");
     }
-    s_hint = label(v, &s2m_font_9, false, LV_ALIGN_BOTTOM_MID, 0, 0, "");
+    /* Five rows fill the screen, so the hint sits in the top bar. */
+    s_hint = label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
 }
 
 static void create_done(lv_obj_t *v) {
@@ -701,13 +702,16 @@ static void update_settings_view(const struct s2mini_ui_settings *c) {
     s2mini_settings_menu_get(&sel, &editing);
     /* Redraw only on a change: setting the same styles every 100 ms made LVGL resend the whole
      * screen over I2C all the time, so a knob step showed up late (and looked like a jump). */
-    static int shown_sel = -1, shown_editing = -1;
+    static int shown_sel = -1, shown_editing = -1, shown_armed = -1;
     static struct s2mini_ui_settings shown;
-    if (sel == shown_sel && editing == shown_editing && memcmp(c, &shown, sizeof(shown)) == 0) {
+    int armed = s2mini_update_armed();
+    if (sel == shown_sel && editing == shown_editing && armed == shown_armed &&
+        memcmp(c, &shown, sizeof(shown)) == 0) {
         return;
     }
     shown_sel = sel;
     shown_editing = editing;
+    shown_armed = armed;
     shown = *c;
     static char bars[S2MINI_BRIGHTNESS_LEVELS + 1];
     for (int i = 0; i < S2MINI_BRIGHTNESS_LEVELS; i++) {
@@ -719,6 +723,7 @@ static void update_settings_view(const struct s2mini_ui_settings *c) {
         c->invert ? "on" : "off",
         c->clock12 ? "12h" : "24h",
         c->show_wpm ? "on" : "off",
+        armed ? "sure?" : "",
     };
     for (int i = 0; i < S2MINI_SET_COUNT; i++) {
         bool on = i == sel;
@@ -733,7 +738,11 @@ static void update_settings_view(const struct s2mini_ui_settings *c) {
             lv_label_set_text(r->value, values[i]);
         }
     }
-    set_text_if_changed(s_hint, editing ? "turn: change  push: save" : "turn: move  push: change");
+    const char *hint = editing ? "push: save" : "push: change";
+    if (sel == S2MINI_SET_UPDATE) {
+        hint = armed ? "push again!" : "push: update";
+    }
+    set_text_if_changed(s_hint, hint);
 }
 
 /* Brightness and colour inversion go straight to the display driver (display thread). */

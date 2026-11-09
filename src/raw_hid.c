@@ -26,6 +26,8 @@
  *   Count 0 = empty list.
  * To the PC (input report): [0] 0x53 [1] 0x10 [2] index of the app to launch.
  *
+ * Firmware update: [0] 0x53 [1] 0x07 [2..5] "BOOT" → restart into the ROM bootloader (esptool).
+ *
  * SPDX-License-Identifier: MIT
  */
 
@@ -51,6 +53,7 @@ LOG_MODULE_REGISTER(s2mini_raw_hid, CONFIG_ZMK_LOG_LEVEL);
 #define FRAME_NOTIF 0x04
 #define FRAME_APP_NAME 0x05
 #define FRAME_APP_ICON 0x06
+#define FRAME_BOOTLOADER 0x07
 #define FRAME_LAUNCH 0x10
 
 static const uint8_t raw_hid_desc[] = {
@@ -307,6 +310,11 @@ int s2mini_app_launch(int index) {
 }
 
 static void parse_frame(const uint8_t *buf, uint16_t len) {
+    if (len >= 6 && buf[0] == FRAME_MAGIC && buf[1] == FRAME_BOOTLOADER &&
+        memcmp(&buf[2], "BOOT", 4) == 0) {
+        s2mini_enter_bootloader();
+        return;
+    }
     if (len >= 5 && buf[0] == FRAME_MAGIC && buf[1] == FRAME_APP_NAME) {
         parse_app_name(buf, len);
         return;

@@ -117,7 +117,14 @@ struct s2mini_timer {
     int done_ms;      /* ms since the time ran out (DONE) */
 };
 
-enum s2mini_setting { S2MINI_SET_BRIGHTNESS, S2MINI_SET_INVERT, S2MINI_SET_CLOCK, S2MINI_SET_WPM, S2MINI_SET_COUNT };
+enum s2mini_setting {
+    S2MINI_SET_BRIGHTNESS,
+    S2MINI_SET_INVERT,
+    S2MINI_SET_CLOCK,
+    S2MINI_SET_WPM,
+    S2MINI_SET_UPDATE, /* firmware update: PUSH twice within 5 s → ROM bootloader */
+    S2MINI_SET_COUNT
+};
 
 struct s2mini_ui_settings {
     uint8_t brightness; /* 1..5 */
@@ -140,3 +147,11 @@ void s2mini_ui_knob(int delta);
 void s2mini_ui_push(void);
 /* Changes on every knob turn / PUSH on these views; the screen polls it to redraw without waiting. */
 uint32_t s2mini_ui_seq(void);
+/* SETTINGS → Update FW: the first PUSH arms it for 5 s (the screen asks to push again). */
+bool s2mini_update_armed(void);
+
+/*
+ * Restart into the ESP32-S2 ROM bootloader (USB 303A:0002) to flash new firmware with esptool,
+ * without the 0 + RST buttons (src/bootloader.c). From SETTINGS → Update FW or a Raw HID command.
+ */
+void s2mini_enter_bootloader(void);

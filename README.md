@@ -7,7 +7,7 @@ ZMK does not officially support the ESP32. This module adds USB OTG for the ESP3
 ## Features
 
 - 5 × 14 matrix (COL2ROW), layers BASE / GAME / FN, ZMK Studio over USB serial (unlock: **Fn + \\**).
-- EC11 knob with modes (VOLUME, SCROLL, TRACK, BRIGHT) and the OLED module buttons PUSH / CON / BAK.
+- EC11 knob (read every 1 ms, `s2mini,ec11-poll`) with modes (VOLUME, SCROLL, TRACK, BRIGHT) and the OLED module buttons PUSH / CON / BAK.
 - 1.3" SH1106 OLED (128 × 64) with views: main (clock, layer, CPU/GPU/iGPU, volume, WPM), now playing, quick launch, timer, COM ports, settings; FN cheat sheet; GAME mode.
 - Raw HID channel (usage page 0xFF60) for data from the PC and app-launch requests to the PC.
 
@@ -26,9 +26,11 @@ ZMK does not officially support the ESP32. This module adds USB OTG for the ESP3
 
 ## Flashing
 
-Prebuilt image: `firmware/s2mini_60-0x0.bin` (flash at address 0x0; checksum in `SHA256SUMS`). Every push also builds it in GitHub Actions (artifact `firmware-s2mini`).
+Prebuilt image: `firmware/s2mini_60-0x0.bin` (flash at address 0x0; checksum in `SHA256SUMS`). Every push builds it in GitHub Actions (artifact `firmware-s2mini`) and commits it to `firmware/`.
 
-1. Hold **0**, press **RST**, release **0** (ROM bootloader).
+Easiest: the **Firmware** tab of the PC app ("Update firmware") downloads the image, switches the keyboard into the bootloader and flashes it. Manually:
+
+1. Enter the ROM bootloader: on the keyboard **SETTINGS → Update FW**, push the knob twice (5 s to confirm); or hold **0**, press **RST**, release **0**.
 2. `esptool --chip esp32s2 write-flash 0x0 s2mini_60-0x0.bin`
 3. Unplug and replug the USB cable (RST alone stays in the bootloader).
 
@@ -46,11 +48,12 @@ west init -l zmk-s2mini/config && west update
 
 ## PC app (S2mini60)
 
-Download the `S2mini60` artifact from the latest *Build PC app* run in Actions, unzip, run `S2mini60.exe`. It sits in the tray and has four tabs:
+Download the `S2mini60` artifact from the latest *Build PC app* run in Actions, unzip, run `S2mini60.exe`. It sits in the tray and has five tabs:
 
 - **Quick launch** – up to 16 apps for the LAUNCH view (Start menu, Store apps or any file); icons are converted to 1-bit with a selectable style and a live OLED preview.
 - **Keymap** – live keymap editing through ZMK Studio; pick a key from a list or by pressing it.
 - **Screen** – what to send (CPU, GPU, iGPU, volume, network, now playing, COM ports, notifications), language (follows Windows, Polish or English), start with Windows.
+- **Firmware** – one-button firmware update (latest image from this repo or a local .bin) with esptool.
 - **Status** – the last data sent.
 
 CPU/GPU temperatures come from [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) with *Remote Web Server* enabled (port 8085). From source: `pip install -r pc-app/requirements.txt` and `python pc-app/s2mini_app.py`; `pc-app/build_exe.bat` builds the exe.

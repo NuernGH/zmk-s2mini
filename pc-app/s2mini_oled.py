@@ -750,6 +750,7 @@ class Sender(threading.Thread):
         self.console, self.dry_run = console, dry_run
         self.stop_event = threading.Event()
         self.status = "starting"
+        self.link = None
 
     def log(self, *a):
         if self.console:
@@ -759,6 +760,14 @@ class Sender(threading.Thread):
         """New settings from the window (the app list is sent right away)."""
         self.config = copy.deepcopy(cfg)
         self.config_version += 1
+
+    def send_raw(self, payload):
+        """One 32 B frame right away (e.g. the bootloader command). False = keyboard not connected."""
+        link = self.link
+        if link is None or link.stuck():
+            return False
+        link.send([payload])
+        return True
 
     def _launch(self, index):
         apps = self.config.get("apps", [])
@@ -817,6 +826,7 @@ class Sender(threading.Thread):
                     self.log("hid: link stuck or lost, reconnecting")
                     link.close()
                     link = None
+                    self.link = None
                 if link is None:
                     try:
                         link = HidLink(self._launch, self.log)
@@ -825,6 +835,7 @@ class Sender(threading.Thread):
                     except Exception:
                         self.status = "keyboard not found"
                     self.log(self.status)
+                self.link = link
                 if link is not None:
                     link.send(payloads)
                     self.last_line = fmt(data)
