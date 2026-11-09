@@ -60,6 +60,7 @@ enum view {
     VIEW_MEDIA,
     VIEW_NOTIF,
     VIEW_LAUNCHER,
+    VIEW_BOOT,
     VIEW_COUNT
 };
 
@@ -305,6 +306,14 @@ static void create_settings(lv_obj_t *v) {
     s_hint = label(v, &s2m_font_9, true, LV_ALIGN_TOP_RIGHT, -2, 1, "");
 }
 
+/* Bootloader: the OLED keeps its picture through the restart, so say what the keyboard is doing. */
+static void create_boot(lv_obj_t *v) {
+    box(v, 0, 0, W, H, true, 0);
+    label(v, &s2m_font_20, true, LV_ALIGN_TOP_MID, 0, 8, "BOOT");
+    label(v, &s2m_font_9, true, LV_ALIGN_BOTTOM_MID, 0, -14, "firmware update mode");
+    label(v, &s2m_font_9, true, LV_ALIGN_BOTTOM_MID, 0, -3, "replug USB to cancel");
+}
+
 static void create_done(lv_obj_t *v) {
     d_box = box(v, 0, 0, W, H, true, 0);
     d_title = label(v, &s2m_font_20, true, LV_ALIGN_TOP_MID, 0, 12, "TIME UP");
@@ -477,6 +486,20 @@ static void notif_sleep_cb(struct k_work *work) {
 static K_WORK_DEFINE(notif_wake_work, notif_wake_cb);
 static K_WORK_DELAYABLE_DEFINE(notif_sleep_work, notif_sleep_cb);
 #endif
+
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE)
+static void boot_wake_cb(struct k_work *work) { unblank_display_cb(work); }
+static K_WORK_DEFINE(boot_wake_work, boot_wake_cb);
+#endif
+
+void s2mini_screen_boot_wake(void) {
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE)
+    k_work_cancel_delayable(&notif_sleep_work);
+    if (zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE) {
+        k_work_submit_to_queue(zmk_display_work_q(), &boot_wake_work);
+    }
+#endif
+}
 
 void s2mini_screen_notif_wake(void) {
 #if IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE)
@@ -787,7 +810,7 @@ static lv_timer_t *update_timer;
 /* Knob turn / PUSH on the timer, settings or launcher: redraw now instead of within 100 ms. */
 static void knob_watch_cb(lv_timer_t *timer) {
     static uint32_t seen;
-    uint32_t seq = s2mini_ui_seq();
+    uint32_t seq = s2mini_ui_seq() + (s2mini_bootloader_pending() ? 1u << 31 : 0);
     if (seq != seen && update_timer != NULL) {
         seen = seq;
         lv_timer_ready(update_timer);
@@ -802,6 +825,11 @@ static void update_cb(lv_timer_t *timer) {
     bool have_pc = false;
     struct s2mini_timer t;
     struct s2mini_ui_settings c;
+
+    if (s2mini_bootloader_pending()) {
+        show(VIEW_BOOT);
+        return;
+    }
 
     s2mini_timer_get(&t);
     s2mini_ui_settings_get(&c);
@@ -974,6 +1002,7 @@ lv_obj_t *zmk_display_status_screen(void) {
     create_media(views[VIEW_MEDIA]);
     create_notif(views[VIEW_NOTIF]);
     create_launcher(views[VIEW_LAUNCHER]);
+    create_boot(views[VIEW_BOOT]);
 
     update_cb(NULL);
     update_timer = lv_timer_create(update_cb, 100, NULL);

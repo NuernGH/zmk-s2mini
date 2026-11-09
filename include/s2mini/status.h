@@ -155,3 +155,7 @@ bool s2mini_update_armed(void);
  * without the 0 + RST buttons (src/bootloader.c). From SETTINGS → Update FW or a Raw HID command.
  */
 void s2mini_enter_bootloader(void);
+/* True from the bootloader request until the restart: the screen shows BOOT. */
+bool s2mini_bootloader_pending(void);
+/* Wake a blanked screen so BOOT is visible (status_screen.c). */
+void s2mini_screen_boot_wake(void);

@@ -8,6 +8,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/reboot.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/logging/log.h>
 #include <soc/rtc_cntl_reg.h>
 
@@ -22,8 +23,16 @@ static void bootloader_work_cb(struct k_work *work) {
 }
 
 static K_WORK_DELAYABLE_DEFINE(bootloader_work, bootloader_work_cb);
+static atomic_t pending;
+
+bool s2mini_bootloader_pending(void) { return atomic_get(&pending) != 0; }
 
 void s2mini_enter_bootloader(void) {
-    /* Short delay: the HID key release and the Raw HID reply still go out before USB drops. */
-    k_work_reschedule(&bootloader_work, K_MSEC(300));
+    atomic_set(&pending, 1);
+#if IS_ENABLED(CONFIG_S2MINI_STATUS_SCREEN)
+    s2mini_screen_boot_wake();
+#endif
+    /* 800 ms: the screen draws BOOT (it keeps that picture through the restart), and the HID key
+     * release still goes out before USB drops. */
+    k_work_reschedule(&bootloader_work, K_MSEC(800));
 }
