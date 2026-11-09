@@ -190,4 +190,5 @@ PL = {
     'Done. The keyboard is restarting; if it does not come back in a few seconds, unplug and replug USB.':
         'Gotowe. Klawiatura się restartuje; jeśli nie wróci po kilku sekundach, odłącz i podłącz USB.',
     'ERROR: {e}': 'BŁĄD: {e}',
+    'Retrying without the flasher stub ({e})…': 'Ponawiam bez stuba esptoola ({e})…',
 }

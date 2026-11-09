@@ -136,8 +136,14 @@ def update(sender, image, log):
                                   "option? Hold 0, press RST and press the button again."))
     log(tr("Bootloader on {p}. Flashing…", p=port))
     time.sleep(0.5)
-    run_esptool(["--chip", "esp32s2", "--port", port, "--before", "no-reset",
-                 "--after", "watchdog-reset", "write-flash", "0x0", image], log)
+    args = ["--chip", "esp32s2", "--port", port, "--before", "no-reset",
+            "--after", "watchdog-reset", "write-flash", "0x0", image]
+    try:
+        run_esptool(args, log)
+    except Exception as e:
+        # The exe may lack esptool's flasher stub files; the ROM loader alone also works (slower).
+        log(tr("Retrying without the flasher stub ({e})…", e=e))
+        run_esptool(["--no-stub"] + args, log)
     log(tr("Done. The keyboard is restarting; if it does not come back in a few seconds, "
            "unplug and replug USB."))
 
