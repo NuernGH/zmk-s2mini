@@ -68,6 +68,8 @@ struct s2mini_notif {
     int64_t at; /* when it arrived (0 = never) */
 };
 void s2mini_notif_get(struct s2mini_notif *out);
+/* A new notification arrived: if the screen is blanked (idle), wake it for the popup (status_screen.c). */
+void s2mini_screen_notif_wake(void);
 
 /*
  * Quick launch (frames 0x05 name, 0x06 icon): app list from the PC app.

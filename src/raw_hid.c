@@ -222,6 +222,9 @@ static void parse_notif(const uint8_t *buf, uint16_t len) {
             notif = notif_pending;
             notif.at = k_uptime_get();
         }
+#if IS_ENABLED(CONFIG_S2MINI_STATUS_SCREEN)
+        s2mini_screen_notif_wake();
+#endif
         break;
     }
 }

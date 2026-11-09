@@ -24,6 +24,8 @@
 #include <zmk/display/status_screen.h>
 #include <zmk/keymap.h>
 #include <zmk/hid_indicators.h>
+#include <zmk/activity.h>
+#include <zmk/display.h>
 #include <s2mini/status.h>
 
 LV_FONT_DECLARE(s2m_font_9);
@@ -441,6 +443,50 @@ static bool notif_popup(void) {
     }
 #endif
     return false;
+}
+
+/*
+ * Notification while the screen is blanked (no keys / knob for the idle time): ZMK blanks the
+ * display and stops LVGL; data from the PC is not "activity", so the popup was never seen.
+ * Wake the screen for the popup and blank it again afterwards if the keyboard is still idle.
+ * Uses ZMK's own display callbacks (app/src/display/main.c), on the display work queue.
+ */
+static bool game_active(void);
+
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE)
+void unblank_display_cb(struct k_work *work);
+void blank_display_cb(struct k_work *work);
+
+static bool woke_for_notif;
+
+static void notif_wake_cb(struct k_work *work) {
+    if (zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE && !game_active()) {
+        woke_for_notif = true;
+        unblank_display_cb(work);
+    }
+}
+
+static void notif_sleep_cb(struct k_work *work) {
+    if (woke_for_notif && zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE) {
+        blank_display_cb(work);
+    }
+    woke_for_notif = false;
+}
+
+static K_WORK_DEFINE(notif_wake_work, notif_wake_cb);
+static K_WORK_DELAYABLE_DEFINE(notif_sleep_work, notif_sleep_cb);
+#endif
+
+void s2mini_screen_notif_wake(void) {
+#if IS_ENABLED(CONFIG_ZMK_DISPLAY_BLANK_ON_IDLE)
+    if (zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE) {
+        return;
+    }
+    k_work_submit_to_queue(zmk_display_work_q(), &notif_wake_work);
+    /* A new notification restarts the 6 s; +0.3 s so the popup is gone before blanking. */
+    k_work_reschedule_for_queue(zmk_display_work_q(), &notif_sleep_work,
+                                K_MSEC(NOTIF_POPUP_MS + 300));
+#endif
 }
 
 static void create_launcher(lv_obj_t *v) {
